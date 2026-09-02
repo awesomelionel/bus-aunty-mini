@@ -2,6 +2,8 @@
 
 A Cloudflare Worker API that provides real-time bus arrival information for multiple bus stops.
 
+> **Note:** This API is an external, already-deployed service — its source code is not part of this repository. This doc exists only to record its contract (endpoint, request/response shape, status codes) for the `firmware/` client in this repo to build against. See [firmware/README.md](../firmware/README.md) for the actual codebase in this repo.
+
 ## Overview
 
 This API fetches bus arrival timing data from a Supabase database and returns formatted information for up to 4 bus stops in a single request.
@@ -81,66 +83,6 @@ The API returns data in a standardized format for all requests:
   - No data found for provided bus stops
 - `500`: Internal server error
 
-## Development
-
-### Prerequisites
-- Node.js (v18 or later recommended)
-- npm
-- Cloudflare Workers account
-- Supabase account and project
-
-### Environment Variables
-
-Required environment variables:
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_ANON_KEY=your_supabase_anon_key
-```
-
-You can set these using:
-1. `.dev.vars` file for local development
-2. Cloudflare dashboard for production
-3. `wrangler secret` command
-
-### Installation
-```bash
-# Install dependencies
-npm install
-
-# Generate Cloudflare Worker types
-npm run cf-typegen
-```
-
-### Running Locally
-```bash
-npm run dev
-```
-
-### Testing
-```bash
-npm test
-```
-
-### Deployment
-```bash
-npm run deploy
-```
-
-## Project Structure
-```
-├── src/
-│   ├── routes/
-│   │   └── v1/
-│   │       └── bus-timing.ts    # V1 bus timing endpoint
-│   ├── types.ts                 # TypeScript types
-│   └── index.ts                 # Main router
-├── test/
-│   └── routes/
-│       └── v1/
-│           └── bus-timing.spec.ts # Tests
-└── wrangler.toml                # Cloudflare config
-```
-
 ## CORS
 
 The API supports Cross-Origin Resource Sharing (CORS) and allows requests from any origin (`Access-Control-Allow-Origin: *`).
@@ -152,9 +94,3 @@ The API includes comprehensive error handling for:
 - Database connection issues
 - Invalid bus stop codes
 - No data scenarios
-
-## Technologies
-- Cloudflare Workers
-- TypeScript
-- Supabase
-- Vitest for testing
