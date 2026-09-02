@@ -3,6 +3,10 @@
 #include <WiFiManager.h>
 #include <time.h>
 
+#include <string>
+
+#include "bus_api_client.h"
+
 namespace {
 
 void showStatus(const char* line1, const char* line2 = "") {
@@ -51,10 +55,10 @@ void setup() {
 
     syncTime();
 
-    time_t now = time(nullptr);
-    char buf[32];
-    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", gmtime(&now));
-    showStatus("Time synced (UTC):", buf);
+    FetchResult fetch = fetchBusArrival("53389");
+    Serial.printf("HTTP status: %d\n", fetch.httpStatus);
+    Serial.println(fetch.body.c_str());
+    showStatus("Fetch HTTP status:", std::to_string(fetch.httpStatus).c_str());
 }
 
 void loop() {
