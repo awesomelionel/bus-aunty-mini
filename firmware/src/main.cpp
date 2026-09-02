@@ -1,29 +1,23 @@
+// firmware/src/main.cpp
 #include <M5Unified.h>
 #include <WiFi.h>
 #include <WiFiManager.h>
 #include <time.h>
 
 #include <string>
+#include <vector>
 
-#include "bus_api_client.h"
+#include "arrival_parser.h"
+#include "display.h"
 
 namespace {
 
-void showStatus(const char* line1, const char* line2 = "") {
-    M5.Display.fillScreen(TFT_BLACK);
-    M5.Display.setCursor(4, 4);
-    M5.Display.println(line1);
-    if (line2[0] != '\0') {
-        M5.Display.println(line2);
-    }
-}
-
 void onEnterConfigPortal(WiFiManager* wm) {
-    showStatus("Connect WiFi to:", "BusAuntyDisplay-Setup");
+    displayShowStatus("Connect WiFi to:\nBusAuntyDisplay-Setup");
 }
 
 void syncTime() {
-    showStatus("Syncing time...");
+    displayShowStatus("Syncing time...");
     configTime(0, 0, "pool.ntp.org", "time.nist.gov");
 
     time_t now = time(nullptr);
@@ -40,25 +34,31 @@ void setup() {
     Serial.begin(115200);
     auto cfg = M5.config();
     M5.begin(cfg);
-    M5.Display.setRotation(1);
-    M5.Display.setTextColor(TFT_WHITE, TFT_BLACK);
+    displaySetup();
 
     WiFiManager wm;
     wm.setAPCallback(onEnterConfigPortal);
     wm.setConfigPortalTimeout(180);
-    showStatus("Connecting WiFi...");
+    displayShowStatus("Connecting WiFi...");
     if (!wm.autoConnect("BusAuntyDisplay-Setup")) {
-        showStatus("WiFi setup timed out.", "Restarting...");
+        displayShowStatus("WiFi setup timed out.\nRestarting...");
         delay(3000);
         ESP.restart();
     }
 
     syncTime();
 
-    FetchResult fetch = fetchBusArrival("53389");
-    Serial.printf("HTTP status: %d\n", fetch.httpStatus);
-    Serial.println(fetch.body.c_str());
-    showStatus("Fetch HTTP status:", std::to_string(fetch.httpStatus).c_str());
+    std::vector<BusService> demoServices;
+    const char* demoNumbers[] = {"12", "147", "36", "980", "5", "88"};
+    for (int i = 0; i < 6; ++i) {
+        BusService svc;
+        svc.serviceNo = demoNumbers[i];
+        svc.times.eta1Epoch = time(nullptr) + (i + 1) * 90;
+        svc.times.eta2Epoch = time(nullptr) + (i + 1) * 300;
+        svc.times.eta3Epoch = time(nullptr) + (i + 1) * 600;
+        demoServices.push_back(svc);
+    }
+    displayShowArrivals("53389", demoServices, time(nullptr), 0, 1);
 }
 
 void loop() {
