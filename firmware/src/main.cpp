@@ -53,6 +53,10 @@ void pollAndRender() {
         displayShowStatus(std::string("Bad response for ") + code);
         return;
     }
+    if (parsed.services.empty()) {
+        displayShowStatus(std::string(code) + ": no services");
+        return;
+    }
 
     std::vector<BusService> shown = selectDisplayServices(parsed.services, 6);
     displayShowArrivals(parsed.busStopCode, shown, time(nullptr),

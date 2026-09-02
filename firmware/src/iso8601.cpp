@@ -22,13 +22,32 @@ int64_t daysFromCivil(int64_t year, unsigned month, unsigned day) {
 
 int64_t parseIso8601ToEpoch(const std::string& iso8601) {
     int year, month, day, hour, minute, second;
-    int fields = sscanf(iso8601.c_str(), "%d-%d-%dT%d:%d:%dZ", &year, &month,
-                         &day, &hour, &minute, &second);
+    int consumed = 0;
+    int fields = sscanf(iso8601.c_str(), "%d-%d-%dT%d:%d:%d%n", &year, &month,
+                         &day, &hour, &minute, &second, &consumed);
     if (fields != 6) {
+        return -1;
+    }
+    if (month < 1 || month > 12 || day < 1 || day > 31 ||
+        hour < 0 || hour > 23 || minute < 0 || minute > 59 ||
+        second < 0 || second > 59) {
         return -1;
     }
 
     int64_t days = daysFromCivil(year, static_cast<unsigned>(month),
                                   static_cast<unsigned>(day));
-    return days * 86400 + hour * 3600 + minute * 60 + second;
+    int64_t epoch = days * 86400 + hour * 3600 + minute * 60 + second;
+
+    const char* tail = iso8601.c_str() + consumed;
+    if (tail[0] == '\0' || (tail[0] == 'Z' && tail[1] == '\0')) {
+        return epoch;
+    }
+    if (tail[0] == '+' || tail[0] == '-') {
+        int offsetHour, offsetMinute;
+        if (sscanf(tail + 1, "%2d:%2d", &offsetHour, &offsetMinute) == 2) {
+            int64_t offsetSeconds = offsetHour * 3600 + offsetMinute * 60;
+            return (tail[0] == '+') ? epoch - offsetSeconds : epoch + offsetSeconds;
+        }
+    }
+    return -1;
 }

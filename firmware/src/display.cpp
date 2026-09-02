@@ -3,6 +3,8 @@
 
 #include <M5Unified.h>
 
+#include <vector>
+
 #include "eta_format.h"
 
 namespace {
@@ -30,7 +32,28 @@ void displayShowStatus(const std::string& message) {
     canvas.fillSprite(TFT_BLACK);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
     canvas.setTextDatum(middle_center);
-    canvas.drawString(message.c_str(), kScreenWidth / 2, kScreenHeight / 2);
+
+    std::vector<std::string> lines;
+    size_t start = 0;
+    while (true) {
+        size_t pos = message.find('\n', start);
+        if (pos == std::string::npos) {
+            lines.push_back(message.substr(start));
+            break;
+        }
+        lines.push_back(message.substr(start, pos - start));
+        start = pos + 1;
+    }
+
+    int lineHeight = canvas.fontHeight();
+    int totalHeight = lineHeight * static_cast<int>(lines.size());
+    int firstLineY = (kScreenHeight - totalHeight) / 2 + lineHeight / 2;
+
+    for (size_t i = 0; i < lines.size(); ++i) {
+        int y = firstLineY + static_cast<int>(i) * lineHeight;
+        canvas.drawString(lines[i].c_str(), kScreenWidth / 2, y);
+    }
+
     canvas.pushSprite(0, 0);
 }
 

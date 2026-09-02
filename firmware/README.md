@@ -37,9 +37,24 @@ pio test -e native
 ```
 
 Hardware-facing code (WiFi provisioning, HTTPS fetch, display rendering,
-button input) isn't unit-testable this way; it's verified manually on-device
-per the checklist in each task of
-`../docs/superpowers/plans/2026-09-02-bus-arrival-display.md`.
+button input) isn't unit-testable this way.
+
+**⚠️ This firmware has never been run on physical hardware.** It compiles
+cleanly and its pure logic (ISO-8601 parsing, ETA formatting, JSON parsing)
+is unit-tested, but the following are all UNVERIFIED and must be checked
+before trusting the device:
+- Boot and screen orientation/rotation
+- WiFi captive-portal walkthrough (first-time provisioning)
+- Display layout — no clipping or overlap across all 6 rows and the status
+  screens (especially multi-line status messages)
+- Button-driven stop cycling
+- Live 30-second poll cycle against the real API, with countdown ticking
+- WiFi-loss detection and recovery
+- HTTP error handling (e.g. an invalid bus stop code)
+
+Work through the on-device checklist in
+`../docs/superpowers/plans/2026-09-02-bus-arrival-display.md` (each task's
+"Manual on-device test" steps) before relying on this firmware.
 
 ## First-time WiFi setup
 

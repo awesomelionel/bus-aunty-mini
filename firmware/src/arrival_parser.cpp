@@ -2,6 +2,8 @@
 
 #include <ArduinoJson.h>
 
+#include <string>
+
 #include "iso8601.h"
 
 namespace {
@@ -30,7 +32,15 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
     }
 
     for (JsonObjectConst stop : doc["busStops"].as<JsonArrayConst>()) {
-        const char* code = stop["BusStopCode"] | "";
+        JsonVariantConst codeVar = stop["BusStopCode"];
+        std::string code;
+        if (codeVar.is<const char*>()) {
+            code = codeVar.as<const char*>();
+        } else if (codeVar.is<long long>()) {
+            code = std::to_string(codeVar.as<long long>());
+        } else {
+            continue;
+        }
         if (expectedStopCode != code) {
             continue;
         }

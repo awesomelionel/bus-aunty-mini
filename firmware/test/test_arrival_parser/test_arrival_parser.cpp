@@ -58,6 +58,22 @@ void test_malformed_json_is_invalid() {
     TEST_ASSERT_FALSE(result.valid);
 }
 
+void test_accepts_numeric_bus_stop_code() {
+    const char* json = R"JSON({
+      "busStops": [
+        {
+          "BusStopCode": 53389,
+          "Services": [
+            { "ServiceNo": "13", "NextBus": {"EstimatedArrival": "2026-09-02T22:18:31+08:00"} }
+          ]
+        }
+      ]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "53389");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL_STRING("53389", result.busStopCode.c_str());
+}
+
 void test_select_display_services_caps_at_six() {
     std::vector<BusService> services;
     for (int i = 0; i < 9; ++i) {
@@ -80,6 +96,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_missing_nextbus2_and_3_return_negative_one);
     RUN_TEST(test_empty_bus_stops_is_invalid);
     RUN_TEST(test_malformed_json_is_invalid);
+    RUN_TEST(test_accepts_numeric_bus_stop_code);
     RUN_TEST(test_select_display_services_caps_at_six);
     return UNITY_END();
 }
