@@ -5,15 +5,19 @@
 #include <time.h>
 
 #include <string>
-#include <vector>
 
 #include "arrival_parser.h"
+#include "bus_api_client.h"
 #include "bus_stops.h"
 #include "display.h"
 
 namespace {
 
+constexpr uint32_t kPollIntervalMs = 30000;
+
 size_t currentStopIndex = 0;
+uint32_t lastPollMillis = 0;
+bool needsImmediateFetch = true;
 
 void onEnterConfigPortal(WiFiManager* wm) {
     displayShowStatus("Connect WiFi to:\nBusAuntyDisplay-Setup");
@@ -31,19 +35,28 @@ void syncTime() {
     }
 }
 
-void renderDemo(size_t stopIndex) {
-    std::vector<BusService> demoServices;
-    const char* demoNumbers[] = {"12", "147", "36", "980", "5", "88"};
-    for (int i = 0; i < 6; ++i) {
-        BusService svc;
-        svc.serviceNo = demoNumbers[i];
-        svc.times.eta1Epoch = time(nullptr) + (i + 1) * 90;
-        svc.times.eta2Epoch = time(nullptr) + (i + 1) * 300;
-        svc.times.eta3Epoch = time(nullptr) + (i + 1) * 600;
-        demoServices.push_back(svc);
+void pollAndRender() {
+    const char* code = kBusStopCodes[currentStopIndex];
+    displayShowStatus(std::string("Loading ") + code + "...");
+
+    FetchResult fetch = fetchBusArrival(code);
+    if (!fetch.ok) {
+        displayShowStatus(fetch.httpStatus == 404
+                               ? std::string("No data for ") + code
+                               : std::string("Fetch failed (") +
+                                     std::to_string(fetch.httpStatus) + ")");
+        return;
     }
-    displayShowArrivals(kBusStopCodes[stopIndex], demoServices, time(nullptr),
-                         stopIndex, kBusStopCodes.size());
+
+    ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, code);
+    if (!parsed.valid) {
+        displayShowStatus(std::string("Bad response for ") + code);
+        return;
+    }
+
+    std::vector<BusService> shown = selectDisplayServices(parsed.services, 6);
+    displayShowArrivals(parsed.busStopCode, shown, time(nullptr),
+                         currentStopIndex, kBusStopCodes.size());
 }
 
 }  // namespace
@@ -65,13 +78,27 @@ void setup() {
     }
 
     syncTime();
-    renderDemo(currentStopIndex);
 }
 
 void loop() {
     M5.update();
+
     if (M5.BtnA.wasPressed()) {
         currentStopIndex = (currentStopIndex + 1) % kBusStopCodes.size();
-        renderDemo(currentStopIndex);
+        needsImmediateFetch = true;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        displayShowStatus("WiFi lost, reconnecting...");
+        WiFi.reconnect();
+        delay(1000);
+        return;
+    }
+
+    uint32_t now = millis();
+    if (needsImmediateFetch || now - lastPollMillis >= kPollIntervalMs) {
+        pollAndRender();
+        lastPollMillis = now;
+        needsImmediateFetch = false;
     }
 }
