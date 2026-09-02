@@ -19,6 +19,14 @@ int64_t readEta(JsonVariantConst nextBus) {
     return parseIso8601ToEpoch(iso);
 }
 
+std::string stripLeadingZeros(const std::string& s) {
+    size_t firstNonZero = s.find_first_not_of('0');
+    if (firstNonZero == std::string::npos) {
+        return "0";  // all zeros (or empty) -> canonical "0"
+    }
+    return s.substr(firstNonZero);
+}
+
 }  // namespace
 
 ParsedBusStop parseBusArrivalResponse(const std::string& json,
@@ -33,19 +41,18 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
 
     for (JsonObjectConst stop : doc["busStops"].as<JsonArrayConst>()) {
         JsonVariantConst codeVar = stop["BusStopCode"];
-        std::string code;
+        bool matched = false;
         if (codeVar.is<const char*>()) {
-            code = codeVar.as<const char*>();
+            matched = (expectedStopCode == codeVar.as<const char*>());
         } else if (codeVar.is<long long>()) {
-            code = std::to_string(codeVar.as<long long>());
-        } else {
-            continue;
+            std::string numericCode = std::to_string(codeVar.as<long long>());
+            matched = (stripLeadingZeros(expectedStopCode) == numericCode);
         }
-        if (expectedStopCode != code) {
+        if (!matched) {
             continue;
         }
 
-        result.busStopCode = code;
+        result.busStopCode = expectedStopCode;
         for (JsonObjectConst service : stop["Services"].as<JsonArrayConst>()) {
             BusService svc;
             svc.serviceNo = service["ServiceNo"] | "";
