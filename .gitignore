@@ -1,0 +1,4 @@
+# .gitignore
+firmware/.pio/
+firmware/.vscode/
+.DS_Store
