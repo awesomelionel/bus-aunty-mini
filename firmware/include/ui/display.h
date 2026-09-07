@@ -8,6 +8,7 @@
 
 void displaySetup();
 void displayShowStatus(const std::string& message);
+void displayShowWifiSetup(const std::string& ssid);
 void displayShowArrivals(const std::string& busStopCode,
                           const std::vector<BusService>& services,
                           int64_t nowEpoch, size_t currentStopIndex,

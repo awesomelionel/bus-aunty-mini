@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/eta_format.h"
+#include "ui/wifi_image.h"
 
 namespace {
 
@@ -17,6 +18,15 @@ constexpr int kRowHeight = 16;
 constexpr int kFirstRowY = 16;
 constexpr int kServiceColX = 4;
 constexpr int kEtaColX[3] = {150, 195, 236};
+constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
+
+// The 96x96 source bitmap has blank padding around the glyph; only rows
+// 16..83 carry ink, so the rest is cropped before scaling.
+constexpr int kWifiIconRowBytes = WIFIIMAGE_WIDTH / 8;
+constexpr int kWifiIconInkTop = 16;
+constexpr int kWifiIconInkHeight = 68;
+constexpr float kWifiIconScale = 0.25f;
+constexpr int kWifiIconTextGap = 12;
 
 }  // namespace
 
@@ -24,7 +34,7 @@ void displaySetup() {
     M5.Display.setRotation(1);
     canvas.setColorDepth(8);
     canvas.createSprite(kScreenWidth, kScreenHeight);
-    canvas.setTextFont(2);
+    canvas.setTextFont(kDefaultTextFont);
     canvas.setTextSize(1);
 }
 
@@ -55,6 +65,43 @@ void displayShowStatus(const std::string& message) {
     }
 
     canvas.pushSprite(0, 0);
+}
+
+void displayShowWifiSetup(const std::string& ssid) {
+    canvas.fillSprite(TFT_BLACK);
+    // 18px here rather than the shared 16px default. Font 2 is a bitmap font,
+    // so scaling it to 18 would resample unevenly; DejaVu18 is natively 18px.
+    canvas.setFont(&fonts::DejaVu18);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextDatum(top_center);
+
+    int lineHeight = canvas.fontHeight();
+    int iconHeight = static_cast<int>(kWifiIconInkHeight * kWifiIconScale + 0.5f);
+    int blockHeight = iconHeight + kWifiIconTextGap + lineHeight * 2;
+    int iconY = (kScreenHeight - blockHeight) / 2;
+
+    // Shrinking the arcs this far needs antialiasing, which only works from a
+    // sprite source, so the cropped bitmap is staged before being zoomed down.
+    M5Canvas icon(&canvas);
+    icon.setColorDepth(8);
+    if (icon.createSprite(WIFIIMAGE_WIDTH, kWifiIconInkHeight)) {
+        icon.fillSprite(TFT_BLACK);
+        icon.drawBitmap(0, 0,
+                        epd_bitmap_WifiImage + kWifiIconInkTop * kWifiIconRowBytes,
+                        WIFIIMAGE_WIDTH, kWifiIconInkHeight, TFT_WHITE);
+        icon.setPivot(WIFIIMAGE_WIDTH / 2.0f, kWifiIconInkHeight / 2.0f);
+        icon.pushRotateZoomWithAA(&canvas, kScreenWidth / 2.0f,
+                                  iconY + iconHeight / 2.0f, 0.0f,
+                                  kWifiIconScale, kWifiIconScale, TFT_BLACK);
+        icon.deleteSprite();
+    }
+
+    int textY = iconY + iconHeight + kWifiIconTextGap;
+    canvas.drawString("Connect WiFi to:", kScreenWidth / 2, textY);
+    canvas.drawString(ssid.c_str(), kScreenWidth / 2, textY + lineHeight);
+
+    canvas.pushSprite(0, 0);
+    canvas.setTextFont(kDefaultTextFont);
 }
 
 void displayShowArrivals(const std::string& busStopCode,

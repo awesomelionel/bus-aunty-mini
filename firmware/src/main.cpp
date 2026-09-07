@@ -14,13 +14,14 @@
 namespace {
 
 constexpr uint32_t kPollIntervalMs = 30000;
+constexpr char kSetupApSsid[] = "BusAuntySetup";
 
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
 
 void onEnterConfigPortal(WiFiManager* wm) {
-    displayShowStatus("Connect WiFi to:\nBusAuntyDisplay-Setup");
+    displayShowWifiSetup(kSetupApSsid);
 }
 
 void syncTime() {
@@ -75,7 +76,7 @@ void setup() {
     wm.setAPCallback(onEnterConfigPortal);
     wm.setConfigPortalTimeout(180);
     displayShowStatus("Connecting WiFi...");
-    if (!wm.autoConnect("BusAuntyDisplay-Setup")) {
+    if (!wm.autoConnect(kSetupApSsid)) {
         displayShowStatus("WiFi setup timed out.\nRestarting...");
         delay(3000);
         ESP.restart();

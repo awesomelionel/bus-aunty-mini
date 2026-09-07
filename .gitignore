@@ -1,4 +1,5 @@
 # .gitignore
 firmware/.pio/
 firmware/.vscode/
+firmware/src/idf_component.yml
 .DS_Store
