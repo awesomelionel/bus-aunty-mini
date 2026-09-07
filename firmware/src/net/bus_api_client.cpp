@@ -1,10 +1,10 @@
-// firmware/src/bus_api_client.cpp
-#include "bus_api_client.h"
+// firmware/src/net/bus_api_client.cpp
+#include "net/bus_api_client.h"
 
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
-#include "certs.h"
+#include "net/certs.h"
 
 FetchResult fetchBusArrival(const std::string& busStopCode) {
     FetchResult result;

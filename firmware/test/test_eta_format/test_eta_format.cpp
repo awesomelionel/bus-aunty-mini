@@ -1,6 +1,6 @@
 #include <unity.h>
 
-#include "eta_format.h"
+#include "core/eta_format.h"
 
 void test_missing_eta_shows_placeholder() {
     TEST_ASSERT_EQUAL_STRING("--", formatEtaMinutes(-1, 1000).c_str());

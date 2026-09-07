@@ -1,10 +1,10 @@
-// firmware/src/display.h
+// firmware/include/ui/display.h
 #pragma once
 #include <cstdint>
 #include <string>
 #include <vector>
 
-#include "arrival_parser.h"
+#include "core/arrival_parser.h"
 
 void displaySetup();
 void displayShowStatus(const std::string& message);

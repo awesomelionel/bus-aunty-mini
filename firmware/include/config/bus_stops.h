@@ -1,4 +1,4 @@
-// firmware/src/bus_stops.h
+// firmware/include/config/bus_stops.h
 #pragma once
 #include <array>
 

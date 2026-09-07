@@ -1,6 +1,6 @@
 #include <unity.h>
 
-#include "arrival_parser.h"
+#include "core/arrival_parser.h"
 
 static const char* kSampleResponse = R"JSON({
   "busStops": [

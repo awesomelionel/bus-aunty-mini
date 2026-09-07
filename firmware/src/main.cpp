@@ -6,10 +6,10 @@
 
 #include <string>
 
-#include "arrival_parser.h"
-#include "bus_api_client.h"
-#include "bus_stops.h"
-#include "display.h"
+#include "config/bus_stops.h"
+#include "core/arrival_parser.h"
+#include "net/bus_api_client.h"
+#include "ui/display.h"
 
 namespace {
 

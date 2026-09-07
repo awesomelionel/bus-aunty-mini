@@ -1,11 +1,11 @@
-// firmware/src/display.cpp
-#include "display.h"
+// firmware/src/ui/display.cpp
+#include "ui/display.h"
 
 #include <M5Unified.h>
 
 #include <vector>
 
-#include "eta_format.h"
+#include "core/eta_format.h"
 
 namespace {
 

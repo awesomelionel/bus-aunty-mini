@@ -1,4 +1,4 @@
-// firmware/src/bus_api_client.h
+// firmware/include/net/bus_api_client.h
 #pragma once
 #include <string>
 
