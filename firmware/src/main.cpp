@@ -25,6 +25,12 @@ uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
 bool noStopsRendered = false;
 
+// The last fetch is kept so paging through a long service list re-renders
+// locally instead of hitting the API again on every button press.
+std::vector<BusService> cachedServices;
+std::string cachedLabel;
+size_t currentPage = 0;
+
 void onPortalStarted() { displayShowWifiSetup(kSetupApSsid); }
 
 // Comparing the serialized form keeps NVS untouched when a portal visit left
@@ -47,10 +53,23 @@ void syncTime() {
     }
 }
 
+void renderCachedPage() {
+    size_t totalPages =
+        servicePageCount(cachedServices.size(), kServicesPerScreen);
+    std::vector<BusService> page =
+        selectServicePage(cachedServices, kServicesPerScreen, currentPage);
+    displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
+                         busStops.size(), currentPage, totalPages);
+}
+
 void pollAndRender() {
     const BusStopConfig& stop = busStops[currentStopIndex];
     const std::string& label = busStopLabel(stop);
     displayShowStatus("Loading " + label + "...");
+
+    // Drop the previous stop's services so Btn A cannot page through stale
+    // data if this fetch fails.
+    cachedServices.clear();
 
     FetchResult fetch = fetchBusArrival(stop.code);
     if (!fetch.ok) {
@@ -71,9 +90,13 @@ void pollAndRender() {
         return;
     }
 
-    std::vector<BusService> shown = selectDisplayServices(parsed.services, 6);
-    displayShowArrivals(label, shown, time(nullptr), currentStopIndex,
-                         busStops.size());
+    cachedServices = parsed.services;
+    cachedLabel = label;
+    if (currentPage >=
+        servicePageCount(cachedServices.size(), kServicesPerScreen)) {
+        currentPage = 0;
+    }
+    renderCachedPage();
 }
 
 // Reopens the captive portal so stops can be edited after the initial setup.
@@ -85,6 +108,8 @@ void openConfigPortal() {
     if (currentStopIndex >= busStops.size()) {
         currentStopIndex = 0;
     }
+    cachedServices.clear();
+    currentPage = 0;
     noStopsRendered = false;
     needsImmediateFetch = true;
     lastPollMillis = millis();
@@ -130,9 +155,18 @@ void loop() {
         return;
     }
 
+    // Btn A walks the current stop's remaining pages before moving on.
     if (M5.BtnA.wasPressed()) {
-        currentStopIndex = (currentStopIndex + 1) % busStops.size();
-        needsImmediateFetch = true;
+        size_t totalPages =
+            servicePageCount(cachedServices.size(), kServicesPerScreen);
+        if (currentPage + 1 < totalPages) {
+            ++currentPage;
+            renderCachedPage();
+        } else {
+            currentPage = 0;
+            currentStopIndex = (currentStopIndex + 1) % busStops.size();
+            needsImmediateFetch = true;
+        }
     }
 
     if (WiFi.status() != WL_CONNECTED) {

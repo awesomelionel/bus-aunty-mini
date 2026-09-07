@@ -97,10 +97,41 @@ void test_select_display_services_caps_at_six() {
         svc.serviceNo = std::to_string(i);
         services.push_back(svc);
     }
-    std::vector<BusService> selected = selectDisplayServices(services, 6);
+    std::vector<BusService> selected = selectServicePage(services, 6, 0);
     TEST_ASSERT_EQUAL(6, selected.size());
     TEST_ASSERT_EQUAL_STRING("0", selected[0].serviceNo.c_str());
     TEST_ASSERT_EQUAL_STRING("5", selected[5].serviceNo.c_str());
+}
+
+static std::vector<BusService> makeServices(size_t count) {
+    std::vector<BusService> services;
+    for (size_t i = 0; i < count; ++i) {
+        BusService svc;
+        svc.serviceNo = std::to_string(i);
+        services.push_back(svc);
+    }
+    return services;
+}
+
+void test_page_count_rounds_up() {
+    TEST_ASSERT_EQUAL_UINT32(0, servicePageCount(0, 6));
+    TEST_ASSERT_EQUAL_UINT32(1, servicePageCount(1, 6));
+    TEST_ASSERT_EQUAL_UINT32(1, servicePageCount(6, 6));
+    TEST_ASSERT_EQUAL_UINT32(2, servicePageCount(7, 6));
+    TEST_ASSERT_EQUAL_UINT32(3, servicePageCount(13, 6));
+}
+
+void test_second_page_continues_where_first_ended() {
+    std::vector<BusService> services = makeServices(8);
+    std::vector<BusService> page = selectServicePage(services, 6, 1);
+    TEST_ASSERT_EQUAL_UINT32(2, page.size());
+    TEST_ASSERT_EQUAL_STRING("6", page[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("7", page[1].serviceNo.c_str());
+}
+
+void test_page_past_the_end_is_empty() {
+    std::vector<BusService> services = makeServices(8);
+    TEST_ASSERT_EQUAL_UINT32(0, selectServicePage(services, 6, 2).size());
 }
 
 void setup() {}
@@ -115,5 +146,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_accepts_numeric_bus_stop_code);
     RUN_TEST(test_matches_numeric_bus_stop_code_with_leading_zero);
     RUN_TEST(test_select_display_services_caps_at_six);
+    RUN_TEST(test_page_count_rounds_up);
+    RUN_TEST(test_second_page_continues_where_first_ended);
+    RUN_TEST(test_page_past_the_end_is_empty);
     return UNITY_END();
 }

@@ -6,12 +6,17 @@
 
 #include "core/arrival_parser.h"
 
+// How many service rows fit under the header at the arrivals font size.
+constexpr size_t kServicesPerScreen = 6;
+
 void displaySetup();
 void displayShowStatus(const std::string& message);
 void displayShowWifiSetup(const std::string& ssid);
 void displayShowNoStops(const std::string& ssid);
 // `stopLabel` is the stop's name, or its code when it was left unnamed.
+// `services` is already the slice for `currentPage`.
 void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusService>& services,
                           int64_t nowEpoch, size_t currentStopIndex,
-                          size_t totalStops);
+                          size_t totalStops, size_t currentPage,
+                          size_t totalPages);

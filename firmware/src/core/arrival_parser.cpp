@@ -68,10 +68,18 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
     return result;
 }
 
-std::vector<BusService> selectDisplayServices(
-    const std::vector<BusService>& services, size_t maxCount) {
+size_t servicePageCount(size_t serviceCount, size_t pageSize) {
+    if (pageSize == 0) {
+        return 0;
+    }
+    return (serviceCount + pageSize - 1) / pageSize;
+}
+
+std::vector<BusService> selectServicePage(
+    const std::vector<BusService>& services, size_t pageSize, size_t page) {
     std::vector<BusService> selected;
-    for (size_t i = 0; i < services.size() && i < maxCount; ++i) {
+    size_t start = page * pageSize;
+    for (size_t i = start; i < services.size() && i < start + pageSize; ++i) {
         selected.push_back(services[i]);
     }
     return selected;

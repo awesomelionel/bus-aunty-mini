@@ -14,10 +14,11 @@ M5Canvas canvas(&M5.Display);
 
 constexpr int kScreenWidth = 240;
 constexpr int kScreenHeight = 135;
-constexpr int kRowHeight = 16;
-constexpr int kFirstRowY = 16;
 constexpr int kServiceColX = 4;
-constexpr int kEtaColX[3] = {150, 195, 236};
+// Right edges of the three ETA columns, spread across the space left after
+// the service number rather than packed against the right edge. At 18px the
+// widest ETA ("10m") is 42px, so this leaves a 17px gutter between columns.
+constexpr int kEtaColX[3] = {119, 178, 236};
 constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
 
 // The 96x96 source bitmap has blank padding around the glyph; only rows
@@ -27,6 +28,25 @@ constexpr int kWifiIconInkTop = 16;
 constexpr int kWifiIconInkHeight = 68;
 constexpr float kWifiIconScale = 0.25f;
 constexpr int kWifiIconTextGap = 12;
+
+// Six 18px rows plus the header end at y=126, leaving 9px for an indicator
+// that shows which page of a long service list is on screen.
+void drawPageDots(size_t currentPage, size_t totalPages) {
+    constexpr int kDotRadius = 2;
+    constexpr int kDotSpacing = 8;
+
+    int y = kScreenHeight - kDotRadius - 2;
+    int x = kScreenWidth / 2 -
+            (static_cast<int>(totalPages - 1) * kDotSpacing) / 2;
+    for (size_t i = 0; i < totalPages; ++i) {
+        if (i == currentPage) {
+            canvas.fillCircle(x, y, kDotRadius, TFT_WHITE);
+        } else {
+            canvas.drawCircle(x, y, kDotRadius, TFT_WHITE);
+        }
+        x += kDotSpacing;
+    }
+}
 
 }  // namespace
 
@@ -126,9 +146,14 @@ void displayShowNoStops(const std::string& ssid) {
 void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusService>& services,
                           int64_t nowEpoch, size_t currentStopIndex,
-                          size_t totalStops) {
+                          size_t totalStops, size_t currentPage,
+                          size_t totalPages) {
     canvas.fillSprite(TFT_BLACK);
+    canvas.setFont(&fonts::DejaVu18);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+
+    // The header takes the first row, leaving exactly kServicesPerScreen rows.
+    int rowHeight = canvas.fontHeight();
 
     canvas.setTextDatum(top_center);
     std::string header = stopLabel + " (" +
@@ -136,8 +161,8 @@ void displayShowArrivals(const std::string& stopLabel,
                           std::to_string(totalStops) + ")";
     canvas.drawString(header.c_str(), kScreenWidth / 2, 0);
 
-    for (size_t i = 0; i < services.size() && i < 6; ++i) {
-        int y = kFirstRowY + static_cast<int>(i) * kRowHeight;
+    for (size_t i = 0; i < services.size() && i < kServicesPerScreen; ++i) {
+        int y = rowHeight + static_cast<int>(i) * rowHeight;
         const BusService& svc = services[i];
 
         canvas.setTextDatum(top_left);
@@ -155,5 +180,10 @@ void displayShowArrivals(const std::string& stopLabel,
             kEtaColX[2], y);
     }
 
+    if (totalPages > 1) {
+        drawPageDots(currentPage, totalPages);
+    }
+
     canvas.pushSprite(0, 0);
+    canvas.setTextFont(kDefaultTextFont);
 }
