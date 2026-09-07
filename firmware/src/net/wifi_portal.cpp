@@ -70,6 +70,9 @@ class BusStopForm {
 bool runPortal(const char* apSsid, std::vector<BusStopConfig>* stops,
                const PortalStartedCallback& onPortalStarted, bool onDemand) {
     WiFiManager wm;
+    // Diagnostic: dumps the scan results and the per-attempt connect result,
+    // which the display cannot show.
+    wm.setDebugOutput(true, WM_DEBUG_VERBOSE);
     wm.setConfigPortalTimeout(kPortalTimeoutSec);
     // Give the bus stops their own "Setup" page. Left on the WiFi page, a
     // returning user would have to retype their WiFi password just to edit a

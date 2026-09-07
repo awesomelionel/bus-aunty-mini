@@ -1,6 +1,7 @@
 // firmware/src/main.cpp
 #include <M5Unified.h>
 #include <WiFi.h>
+#include <esp_system.h>
 #include <time.h>
 
 #include <string>
@@ -32,6 +33,37 @@ std::string cachedLabel;
 size_t currentPage = 0;
 
 void onPortalStarted() { displayShowWifiSetup(kSetupApSsid); }
+
+// Diagnostic: the screen only ever shows a binary connected/not-connected, so
+// these are the only way to tell a rejected password from an AP the radio
+// never saw, or from a reboot that restarts setup() before the portal opens.
+void logWifiDiagnostics() {
+    Serial.printf("[boot] reset reason %d, free heap %u\n",
+                  static_cast<int>(esp_reset_reason()), ESP.getFreeHeap());
+
+    WiFi.onEvent(
+        [](arduino_event_id_t, arduino_event_info_t info) {
+            const auto& e = info.wifi_sta_connected;
+            Serial.printf("[wifi] associated: channel %u, authmode %u\n",
+                          e.channel, static_cast<unsigned>(e.authmode));
+        },
+        ARDUINO_EVENT_WIFI_STA_CONNECTED);
+
+    WiFi.onEvent(
+        [](arduino_event_id_t, arduino_event_info_t info) {
+            const auto& e = info.wifi_sta_disconnected;
+            Serial.printf("[wifi] disconnected: reason %u, rssi %d\n", e.reason,
+                          e.rssi);
+        },
+        ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
+    WiFi.onEvent(
+        [](arduino_event_id_t, arduino_event_info_t) {
+            Serial.printf("[wifi] got ip %s\n",
+                          WiFi.localIP().toString().c_str());
+        },
+        ARDUINO_EVENT_WIFI_STA_GOT_IP);
+}
 
 // Comparing the serialized form keeps NVS untouched when a portal visit left
 // the stops alone, which is the common case on every boot.
@@ -126,6 +158,8 @@ void setup() {
 
     busStops = loadBusStops();
     std::string savedStops = serializeBusStops(busStops);
+
+    logWifiDiagnostics();
 
     displayShowStatus("Connecting WiFi...");
     if (!wifiPortalConnect(kSetupApSsid, &busStops, onPortalStarted)) {
