@@ -1,27 +1,38 @@
 // firmware/src/main.cpp
 #include <M5Unified.h>
 #include <WiFi.h>
-#include <WiFiManager.h>
 #include <time.h>
 
 #include <string>
+#include <vector>
 
-#include "config/bus_stops.h"
 #include "core/arrival_parser.h"
+#include "core/bus_stop_config.h"
 #include "net/bus_api_client.h"
+#include "net/wifi_portal.h"
+#include "storage/bus_stop_store.h"
 #include "ui/display.h"
 
 namespace {
 
 constexpr uint32_t kPollIntervalMs = 30000;
+constexpr uint32_t kPortalHoldMs = 3000;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
 
+std::vector<BusStopConfig> busStops;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
+bool noStopsRendered = false;
 
-void onEnterConfigPortal(WiFiManager* wm) {
-    displayShowWifiSetup(kSetupApSsid);
+void onPortalStarted() { displayShowWifiSetup(kSetupApSsid); }
+
+// Comparing the serialized form keeps NVS untouched when a portal visit left
+// the stops alone, which is the common case on every boot.
+void persistStopsIfChanged(const std::string& before) {
+    if (serializeBusStops(busStops) != before) {
+        saveBusStops(busStops);
+    }
 }
 
 void syncTime() {
@@ -37,31 +48,46 @@ void syncTime() {
 }
 
 void pollAndRender() {
-    const char* code = kBusStopCodes[currentStopIndex];
-    displayShowStatus(std::string("Loading ") + code + "...");
+    const BusStopConfig& stop = busStops[currentStopIndex];
+    const std::string& label = busStopLabel(stop);
+    displayShowStatus("Loading " + label + "...");
 
-    FetchResult fetch = fetchBusArrival(code);
+    FetchResult fetch = fetchBusArrival(stop.code);
     if (!fetch.ok) {
         displayShowStatus(fetch.httpStatus == 404
-                               ? std::string("No data for ") + code
+                               ? "No data for " + label
                                : std::string("Fetch failed (") +
                                      std::to_string(fetch.httpStatus) + ")");
         return;
     }
 
-    ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, code);
+    ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
     if (!parsed.valid) {
-        displayShowStatus(std::string("Bad response for ") + code);
+        displayShowStatus("Bad response for " + label);
         return;
     }
     if (parsed.services.empty()) {
-        displayShowStatus(std::string(code) + ": no services");
+        displayShowStatus(label + ": no services");
         return;
     }
 
     std::vector<BusService> shown = selectDisplayServices(parsed.services, 6);
-    displayShowArrivals(parsed.busStopCode, shown, time(nullptr),
-                         currentStopIndex, kBusStopCodes.size());
+    displayShowArrivals(label, shown, time(nullptr), currentStopIndex,
+                         busStops.size());
+}
+
+// Reopens the captive portal so stops can be edited after the initial setup.
+void openConfigPortal() {
+    std::string before = serializeBusStops(busStops);
+    wifiPortalReconfigure(kSetupApSsid, &busStops, onPortalStarted);
+    persistStopsIfChanged(before);
+
+    if (currentStopIndex >= busStops.size()) {
+        currentStopIndex = 0;
+    }
+    noStopsRendered = false;
+    needsImmediateFetch = true;
+    lastPollMillis = millis();
 }
 
 }  // namespace
@@ -70,17 +96,19 @@ void setup() {
     Serial.begin(115200);
     auto cfg = M5.config();
     M5.begin(cfg);
+    M5.BtnB.setHoldThresh(kPortalHoldMs);
     displaySetup();
 
-    WiFiManager wm;
-    wm.setAPCallback(onEnterConfigPortal);
-    wm.setConfigPortalTimeout(180);
+    busStops = loadBusStops();
+    std::string savedStops = serializeBusStops(busStops);
+
     displayShowStatus("Connecting WiFi...");
-    if (!wm.autoConnect(kSetupApSsid)) {
+    if (!wifiPortalConnect(kSetupApSsid, &busStops, onPortalStarted)) {
         displayShowStatus("WiFi setup timed out.\nRestarting...");
         delay(3000);
         ESP.restart();
     }
+    persistStopsIfChanged(savedStops);
 
     syncTime();
 }
@@ -88,8 +116,22 @@ void setup() {
 void loop() {
     M5.update();
 
+    if (M5.BtnB.wasHold()) {
+        openConfigPortal();
+        return;
+    }
+
+    if (busStops.empty()) {
+        if (!noStopsRendered) {
+            displayShowNoStops(kSetupApSsid);
+            noStopsRendered = true;
+        }
+        delay(50);
+        return;
+    }
+
     if (M5.BtnA.wasPressed()) {
-        currentStopIndex = (currentStopIndex + 1) % kBusStopCodes.size();
+        currentStopIndex = (currentStopIndex + 1) % busStops.size();
         needsImmediateFetch = true;
     }
 

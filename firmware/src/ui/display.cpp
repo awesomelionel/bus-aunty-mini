@@ -104,18 +104,37 @@ void displayShowWifiSetup(const std::string& ssid) {
     canvas.setTextFont(kDefaultTextFont);
 }
 
-void displayShowArrivals(const std::string& busStopCode,
+void displayShowNoStops(const std::string& ssid) {
+    canvas.fillSprite(TFT_BLACK);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextDatum(top_center);
+
+    int lineHeight = canvas.fontHeight();
+    const std::string lines[] = {"No bus stops yet", "Hold Btn B, then",
+                                 "join WiFi:", ssid};
+    int count = static_cast<int>(sizeof(lines) / sizeof(lines[0]));
+    int firstLineY = (kScreenHeight - lineHeight * count) / 2;
+
+    for (int i = 0; i < count; ++i) {
+        canvas.drawString(lines[i].c_str(), kScreenWidth / 2,
+                          firstLineY + i * lineHeight);
+    }
+
+    canvas.pushSprite(0, 0);
+}
+
+void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusService>& services,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops) {
     canvas.fillSprite(TFT_BLACK);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
-    canvas.setTextDatum(top_left);
-    std::string header = busStopCode + " (" +
+    canvas.setTextDatum(top_center);
+    std::string header = stopLabel + " (" +
                           std::to_string(currentStopIndex + 1) + "/" +
                           std::to_string(totalStops) + ")";
-    canvas.drawString(header.c_str(), kServiceColX, 0);
+    canvas.drawString(header.c_str(), kScreenWidth / 2, 0);
 
     for (size_t i = 0; i < services.size() && i < 6; ++i) {
         int y = kFirstRowY + static_cast<int>(i) * kRowHeight;
