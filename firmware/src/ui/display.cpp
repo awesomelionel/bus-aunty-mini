@@ -64,6 +64,50 @@ void drawPageDots(size_t currentPage, size_t totalPages) {
     }
 }
 
+constexpr int kBatteryBodyWidth = 20;
+constexpr int kBatteryHeight = 11;
+constexpr int kBatteryTipWidth = 2;
+constexpr int kBatteryTipHeight = 5;
+constexpr int kBatteryRightMargin = 2;
+constexpr int kBatteryY = 2;
+constexpr int kBatteryLowPercent = 20;
+// The header is centred in what the battery icon leaves free, so a long stop
+// name cannot run underneath it.
+constexpr int kHeaderRightPad =
+    kBatteryBodyWidth + kBatteryTipWidth + kBatteryRightMargin + 4;
+
+void drawBattery(const BatteryReading& battery) {
+    if (battery.percent < 0) {
+        return;  // running off USB with no battery attached
+    }
+
+    int x = kScreenWidth - kBatteryBodyWidth - kBatteryTipWidth -
+            kBatteryRightMargin;
+    canvas.drawRect(x, kBatteryY, kBatteryBodyWidth, kBatteryHeight, TFT_WHITE);
+    canvas.fillRect(x + kBatteryBodyWidth,
+                    kBatteryY + (kBatteryHeight - kBatteryTipHeight) / 2,
+                    kBatteryTipWidth, kBatteryTipHeight, TFT_WHITE);
+
+    if (battery.percent == 0) {
+        return;
+    }
+    int innerWidth = kBatteryBodyWidth - 2;
+    // Keep a sliver visible at low percentages so it stays distinguishable
+    // from an empty outline.
+    int fillWidth = (innerWidth * battery.percent + 50) / 100;
+    if (fillWidth < 1) {
+        fillWidth = 1;
+    }
+
+    uint16_t color = TFT_WHITE;
+    if (battery.charging) {
+        color = TFT_GREEN;
+    } else if (battery.percent <= kBatteryLowPercent) {
+        color = TFT_RED;
+    }
+    canvas.fillRect(x + 1, kBatteryY + 1, fillWidth, kBatteryHeight - 2, color);
+}
+
 }  // namespace
 
 void displaySetup() {
@@ -163,7 +207,7 @@ void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusService>& services,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
-                          size_t totalPages) {
+                          size_t totalPages, const BatteryReading& battery) {
     canvas.fillSprite(TFT_BLACK);
     canvas.setFont(&fonts::DejaVu18);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -175,7 +219,9 @@ void displayShowArrivals(const std::string& stopLabel,
     std::string header = stopLabel + " (" +
                           std::to_string(currentStopIndex + 1) + "/" +
                           std::to_string(totalStops) + ")";
-    canvas.drawString(header.c_str(), kScreenWidth / 2, 0);
+    canvas.drawString(header.c_str(), (kScreenWidth - kHeaderRightPad) / 2, 0);
+
+    drawBattery(battery);
 
     for (size_t i = 0; i < services.size() && i < kServicesPerScreen; ++i) {
         int y = rowHeight + static_cast<int>(i) * rowHeight;

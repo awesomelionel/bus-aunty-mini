@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/arrival_parser.h"
+#include "ui/battery.h"
 
 // How many service rows fit under the header at the arrivals font size.
 constexpr size_t kServicesPerScreen = 6;
@@ -19,4 +20,4 @@ void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusService>& services,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
-                          size_t totalPages);
+                          size_t totalPages, const BatteryReading& battery);

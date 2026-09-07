@@ -12,6 +12,7 @@
 #include "net/bus_api_client.h"
 #include "net/wifi_portal.h"
 #include "storage/bus_stop_store.h"
+#include "ui/battery.h"
 #include "ui/display.h"
 
 namespace {
@@ -91,7 +92,8 @@ void renderCachedPage() {
     std::vector<BusService> page =
         selectServicePage(cachedServices, kServicesPerScreen, currentPage);
     displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
-                         busStops.size(), currentPage, totalPages);
+                         busStops.size(), currentPage, totalPages,
+                         batteryReading());
 }
 
 void pollAndRender() {
@@ -174,6 +176,9 @@ void setup() {
 
 void loop() {
     M5.update();
+    // Sampled out here rather than at render time: the loop is idle between
+    // fetches, which is when the battery voltage reads true.
+    batteryPoll();
 
     if (M5.BtnB.wasHold()) {
         openConfigPortal();
