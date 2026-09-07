@@ -25,9 +25,47 @@ void test_parses_service_and_three_etas() {
     TEST_ASSERT_EQUAL_STRING("67379", result.busStopCode.c_str());
     TEST_ASSERT_EQUAL(1, result.services.size());
     TEST_ASSERT_EQUAL_STRING("123", result.services[0].serviceNo.c_str());
-    TEST_ASSERT_EQUAL_INT64(1710938096LL, result.services[0].times.eta1Epoch);
-    TEST_ASSERT_EQUAL_INT64(1710938696LL, result.services[0].times.eta2Epoch);
-    TEST_ASSERT_EQUAL_INT64(1710939296LL, result.services[0].times.eta3Epoch);
+    TEST_ASSERT_EQUAL_INT64(1710938096LL, result.services[0].arrivals[0].etaEpoch);
+    TEST_ASSERT_EQUAL_INT64(1710938696LL, result.services[0].arrivals[1].etaEpoch);
+    TEST_ASSERT_EQUAL_INT64(1710939296LL, result.services[0].arrivals[2].etaEpoch);
+}
+
+void test_parses_load_for_each_arrival() {
+    ParsedBusStop result = parseBusArrivalResponse(kSampleResponse, "67379");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(BusLoad::SeatsAvailable, result.services[0].arrivals[0].load);
+    TEST_ASSERT_EQUAL(BusLoad::StandingAvailable,
+                      result.services[0].arrivals[1].load);
+    TEST_ASSERT_EQUAL(BusLoad::LimitedStanding,
+                      result.services[0].arrivals[2].load);
+}
+
+void test_load_codes_map_to_crowding_levels() {
+    TEST_ASSERT_EQUAL(BusLoad::SeatsAvailable, parseBusLoad("SEA"));
+    TEST_ASSERT_EQUAL(BusLoad::StandingAvailable, parseBusLoad("SDA"));
+    TEST_ASSERT_EQUAL(BusLoad::LimitedStanding, parseBusLoad("LSD"));
+}
+
+void test_unrecognised_load_is_unknown() {
+    TEST_ASSERT_EQUAL(BusLoad::Unknown, parseBusLoad(""));
+    TEST_ASSERT_EQUAL(BusLoad::Unknown, parseBusLoad("sea"));
+    TEST_ASSERT_EQUAL(BusLoad::Unknown, parseBusLoad("XYZ"));
+}
+
+void test_missing_load_field_is_unknown() {
+    const char* json = R"JSON({
+      "busStops": [
+        {
+          "BusStopCode": "67379",
+          "Services": [
+            { "ServiceNo": "5", "NextBus": {"EstimatedArrival": "2024-03-20T12:34:56Z"} }
+          ]
+        }
+      ]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "67379");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(BusLoad::Unknown, result.services[0].arrivals[0].load);
 }
 
 void test_missing_nextbus2_and_3_return_negative_one() {
@@ -43,8 +81,8 @@ void test_missing_nextbus2_and_3_return_negative_one() {
     })JSON";
     ParsedBusStop result = parseBusArrivalResponse(json, "67379");
     TEST_ASSERT_TRUE(result.valid);
-    TEST_ASSERT_EQUAL_INT64(-1, result.services[0].times.eta2Epoch);
-    TEST_ASSERT_EQUAL_INT64(-1, result.services[0].times.eta3Epoch);
+    TEST_ASSERT_EQUAL_INT64(-1, result.services[0].arrivals[1].etaEpoch);
+    TEST_ASSERT_EQUAL_INT64(-1, result.services[0].arrivals[2].etaEpoch);
 }
 
 void test_empty_bus_stops_is_invalid() {
@@ -140,6 +178,10 @@ void loop() {}
 int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_parses_service_and_three_etas);
+    RUN_TEST(test_parses_load_for_each_arrival);
+    RUN_TEST(test_load_codes_map_to_crowding_levels);
+    RUN_TEST(test_unrecognised_load_is_unknown);
+    RUN_TEST(test_missing_load_field_is_unknown);
     RUN_TEST(test_missing_nextbus2_and_3_return_negative_one);
     RUN_TEST(test_empty_bus_stops_is_invalid);
     RUN_TEST(test_malformed_json_is_invalid);

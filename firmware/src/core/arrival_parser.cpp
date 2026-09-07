@@ -8,15 +8,18 @@
 
 namespace {
 
-int64_t readEta(JsonVariantConst nextBus) {
+BusArrival readArrival(JsonVariantConst nextBus) {
+    BusArrival arrival;
     if (nextBus.isNull()) {
-        return -1;
+        return arrival;
     }
     const char* iso = nextBus["EstimatedArrival"] | "";
     if (iso[0] == '\0') {
-        return -1;
+        return arrival;
     }
-    return parseIso8601ToEpoch(iso);
+    arrival.etaEpoch = parseIso8601ToEpoch(iso);
+    arrival.load = parseBusLoad(nextBus["Load"] | "");
+    return arrival;
 }
 
 std::string stripLeadingZeros(const std::string& s) {
@@ -56,9 +59,9 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
         for (JsonObjectConst service : stop["Services"].as<JsonArrayConst>()) {
             BusService svc;
             svc.serviceNo = service["ServiceNo"] | "";
-            svc.times.eta1Epoch = readEta(service["NextBus"]);
-            svc.times.eta2Epoch = readEta(service["NextBus2"]);
-            svc.times.eta3Epoch = readEta(service["NextBus3"]);
+            svc.arrivals[0] = readArrival(service["NextBus"]);
+            svc.arrivals[1] = readArrival(service["NextBus2"]);
+            svc.arrivals[2] = readArrival(service["NextBus3"]);
             result.services.push_back(svc);
         }
         result.valid = true;
@@ -66,6 +69,19 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
     }
 
     return result;
+}
+
+BusLoad parseBusLoad(const std::string& raw) {
+    if (raw == "SEA") {
+        return BusLoad::SeatsAvailable;
+    }
+    if (raw == "SDA") {
+        return BusLoad::StandingAvailable;
+    }
+    if (raw == "LSD") {
+        return BusLoad::LimitedStanding;
+    }
+    return BusLoad::Unknown;
 }
 
 size_t servicePageCount(size_t serviceCount, size_t pageSize) {

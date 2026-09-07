@@ -1,17 +1,30 @@
 #pragma once
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
 
-struct BusArrivalTimes {
-    int64_t eta1Epoch = -1;
-    int64_t eta2Epoch = -1;
-    int64_t eta3Epoch = -1;
+// How full a bus is, from the feed's "Load" field. The display colours each
+// arrival by this, so an unreadable or absent value has to stay distinct from
+// a genuinely empty bus rather than defaulting to one.
+enum class BusLoad {
+    Unknown,
+    SeatsAvailable,     // "SEA"
+    StandingAvailable,  // "SDA"
+    LimitedStanding,    // "LSD"
+};
+
+// The feed carries at most three upcoming buses per service.
+constexpr size_t kArrivalsPerService = 3;
+
+struct BusArrival {
+    int64_t etaEpoch = -1;
+    BusLoad load = BusLoad::Unknown;
 };
 
 struct BusService {
     std::string serviceNo;
-    BusArrivalTimes times;
+    std::array<BusArrival, kArrivalsPerService> arrivals;
 };
 
 struct ParsedBusStop {
@@ -22,6 +35,8 @@ struct ParsedBusStop {
 
 ParsedBusStop parseBusArrivalResponse(const std::string& json,
                                        const std::string& expectedStopCode);
+
+BusLoad parseBusLoad(const std::string& raw);
 
 // A stop can list more services than fit on screen, so they are shown a page
 // at a time. Returns 0 pages when there is nothing to show.

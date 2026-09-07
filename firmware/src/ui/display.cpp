@@ -18,8 +18,24 @@ constexpr int kServiceColX = 4;
 // Right edges of the three ETA columns, spread across the space left after
 // the service number rather than packed against the right edge. At 18px the
 // widest ETA ("60+") is 40px, so this leaves an 18px gutter between columns.
-constexpr int kEtaColX[3] = {119, 178, 236};
+constexpr int kEtaColX[kArrivalsPerService] = {119, 178, 236};
 constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
+
+// Each arrival is tinted by how full that bus is. Colour carries the load and
+// nothing else, so an arriving bus is left to read as "Arr" on its own.
+uint16_t loadColor(BusLoad load) {
+    switch (load) {
+        case BusLoad::SeatsAvailable:
+            return TFT_GREEN;
+        case BusLoad::StandingAvailable:
+            return TFT_ORANGE;
+        case BusLoad::LimitedStanding:
+            return TFT_RED;
+        case BusLoad::Unknown:
+            break;
+    }
+    return TFT_WHITE;
+}
 
 // The 96x96 source bitmap has blank padding around the glyph; only rows
 // 16..83 carry ink, so the rest is cropped before scaling.
@@ -170,13 +186,23 @@ void displayShowArrivals(const std::string& stopLabel,
         canvas.drawString(svc.serviceNo.c_str(), kServiceColX, y);
 
         canvas.setTextDatum(top_right);
-        const int64_t etaEpochs[3] = {svc.times.eta1Epoch, svc.times.eta2Epoch,
-                                      svc.times.eta3Epoch};
-        for (int col = 0; col < 3; ++col) {
-            std::string eta = formatEtaMinutes(etaEpochs[col], nowEpoch);
-            canvas.setTextColor(
-                eta == kEtaArrivingLabel ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
+        for (size_t col = 0; col < kArrivalsPerService; ++col) {
+            const BusArrival& arrival = svc.arrivals[col];
+            std::string eta = formatEtaMinutes(arrival.etaEpoch, nowEpoch);
+
+            // Single argument leaves the text background transparent, which
+            // the second pass below depends on. Safe because every frame
+            // starts from a cleared sprite.
+            canvas.setTextColor(loadColor(arrival.load));
             canvas.drawString(eta.c_str(), kEtaColX[col], y);
+
+            // Colour is spoken for by load, so an arriving bus is emphasised
+            // by weight: overdrawing a pixel to the left thickens the stems.
+            // Leftward because the columns are right-aligned, so that is
+            // where the spare room is.
+            if (eta == kEtaArrivingLabel) {
+                canvas.drawString(eta.c_str(), kEtaColX[col] - 1, y);
+            }
         }
     }
 
