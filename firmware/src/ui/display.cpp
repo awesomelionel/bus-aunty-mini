@@ -17,7 +17,7 @@ constexpr int kScreenHeight = 135;
 constexpr int kServiceColX = 4;
 // Right edges of the three ETA columns, spread across the space left after
 // the service number rather than packed against the right edge. At 18px the
-// widest ETA ("10m") is 42px, so this leaves a 17px gutter between columns.
+// widest ETA ("60+") is 40px, so this leaves an 18px gutter between columns.
 constexpr int kEtaColX[3] = {119, 178, 236};
 constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
 
@@ -165,19 +165,19 @@ void displayShowArrivals(const std::string& stopLabel,
         int y = rowHeight + static_cast<int>(i) * rowHeight;
         const BusService& svc = services[i];
 
+        canvas.setTextColor(TFT_WHITE, TFT_BLACK);
         canvas.setTextDatum(top_left);
         canvas.drawString(svc.serviceNo.c_str(), kServiceColX, y);
 
         canvas.setTextDatum(top_right);
-        canvas.drawString(
-            formatEtaMinutes(svc.times.eta1Epoch, nowEpoch).c_str(),
-            kEtaColX[0], y);
-        canvas.drawString(
-            formatEtaMinutes(svc.times.eta2Epoch, nowEpoch).c_str(),
-            kEtaColX[1], y);
-        canvas.drawString(
-            formatEtaMinutes(svc.times.eta3Epoch, nowEpoch).c_str(),
-            kEtaColX[2], y);
+        const int64_t etaEpochs[3] = {svc.times.eta1Epoch, svc.times.eta2Epoch,
+                                      svc.times.eta3Epoch};
+        for (int col = 0; col < 3; ++col) {
+            std::string eta = formatEtaMinutes(etaEpochs[col], nowEpoch);
+            canvas.setTextColor(
+                eta == kEtaArrivingLabel ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
+            canvas.drawString(eta.c_str(), kEtaColX[col], y);
+        }
     }
 
     if (totalPages > 1) {

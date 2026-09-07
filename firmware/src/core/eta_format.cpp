@@ -5,15 +5,15 @@ std::string formatEtaMinutes(int64_t targetEpoch, int64_t nowEpoch) {
         return "--";
     }
 
-    int64_t diffSeconds = targetEpoch - nowEpoch;
-    int64_t minutes = (diffSeconds >= 0) ? (diffSeconds + 30) / 60
-                                          : -((-diffSeconds + 30) / 60);
+    // Floor rather than round to nearest, so 2m30s shows as 2. Understating
+    // the wait never leaves you thinking you have more time than you do.
+    int64_t minutes = (targetEpoch - nowEpoch) / 60;
 
     if (minutes <= 0) {
-        return "Due";
+        return kEtaArrivingLabel;
     }
     if (minutes > 60) {
         return "60+";
     }
-    return std::to_string(minutes) + "m";
+    return std::to_string(minutes);
 }
