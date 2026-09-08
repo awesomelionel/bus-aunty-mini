@@ -2,14 +2,14 @@
 #pragma once
 #include <cstdint>
 
-// Idling goes through two stages before the device shuts down: the backlight
-// drops first, which is both a saving on its own and a warning that the screen
-// is about to go, and then everything sleeps until a button is pressed.
-enum class PowerMode { Awake, Dimmed, Asleep };
+// A device left alone goes dark: once it has been idle long enough the screen
+// and the radio both go off until a button is pressed. There is no dimmed
+// in-between stage — the backlight is either at its working level or the
+// device is asleep.
+enum class PowerMode { Awake, Asleep };
 
 struct SleepSettings {
     bool enabled = true;
-    uint32_t dimAfterMs = 0;
     uint32_t sleepAfterMs = 0;
 };
 

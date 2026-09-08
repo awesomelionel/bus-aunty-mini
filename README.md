@@ -42,7 +42,7 @@ pio run -e sticks3 -t upload -t monitor  # build + flash + open serial monitor
 ## Run the unit tests
 
 The pure logic in `src/core/` (ISO-8601 parsing, ETA formatting, JSON parsing,
-bus stop config validation, the sleep/dim decision) runs as host-native unit
+bus stop config validation, the sleep decision) runs as host-native unit
 tests — no device needed:
 
 ```bash
@@ -104,12 +104,9 @@ stop has none).
 ## Sleep mode
 
 On battery, the device does not stay lit and polling while nobody is looking at
-it. Two idle stages, both counted from the last button press:
-
-| Idle for | What happens |
-| --- | --- |
-| 30s | The backlight dims. The screen stays live and polling carries on |
-| 2 min | `Sleeping...`, then the screen and the WiFi radio go off |
+it. Two minutes after the last button press it shows `Sleeping...` and then the
+screen and the WiFi radio both go off. There is no dimmed in-between stage —
+the backlight is either at its working level or the device is asleep.
 
 Holding KEY1 for 1.5 seconds sleeps immediately, without waiting out the
 timeout. Pressing either button wakes the device: it restores the screen,
@@ -130,10 +127,10 @@ is read from the PMIC as charging, or as no battery being attached, so a device
 sitting on USB with a *fully charged* battery may report neither and still doze
 off. One press brings it back.
 
-The timings, the dim level and the hold-to-sleep threshold are compile-time
-constants: `kDimAfterMs`, `kSleepAfterMs` and `kSleepHoldMs` in
-`src/main.cpp`, and `kBrightnessFull`/`kBrightnessDim` in `src/ui/display.cpp`.
-The decision itself — awake, dimmed or asleep — is pure logic in
+The timeout, the backlight level and the hold-to-sleep threshold are
+compile-time constants: `kSleepAfterMs` and `kSleepHoldMs` in `src/main.cpp`,
+and `kBrightnessFull` in `src/ui/display.cpp`. The decision itself — awake or
+asleep — is pure logic in
 `src/core/sleep_policy.cpp` and is covered by the native unit tests; the
 light-sleep and wake-source handling in `src/power/` is hardware-facing and has
 to be checked on device.

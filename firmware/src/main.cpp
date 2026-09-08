@@ -25,9 +25,8 @@ constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
 
 // Long enough to read the screen and page through a couple of stops without it
-// dimming under you, short enough that a device left face-up on a table is not
-// still lit and polling a minute later.
-constexpr uint32_t kDimAfterMs = 30000;
+// going dark under you, short enough that a device left face-up on a table is
+// not still lit and polling a minute later.
 constexpr uint32_t kSleepAfterMs = 120000;
 // How long "Sleeping..." stays up, so the screen going black reads as
 // deliberate rather than as a flat battery.
@@ -44,7 +43,6 @@ bool needsImmediateFetch = true;
 bool noStopsRendered = false;
 
 uint32_t lastInteractionMillis = 0;
-PowerMode powerMode = PowerMode::Awake;
 
 // The last fetch is kept so paging through a long service list re-renders
 // locally instead of hitting the API again on every button press.
@@ -156,9 +154,6 @@ void noteInteraction() { lastInteractionMillis = millis(); }
 
 // Blanks the screen, drops the radio, and blocks until a button is pressed.
 void enterSleep() {
-    // Back to full brightness first: on the idle path the screen is already
-    // dimmed, and the notice is the one thing here that has to be read.
-    displaySetDimmed(false);
     displayShowStatus("Sleeping...");
     delay(kSleepNoticeMs);
     displaySleep();
@@ -186,7 +181,6 @@ void enterSleep() {
     noStopsRendered = false;
     needsImmediateFetch = true;
     lastPollMillis = millis();
-    powerMode = PowerMode::Awake;
     noteInteraction();
 }
 
@@ -194,7 +188,6 @@ void enterSleep() {
 // iteration rather than act on button state read minutes ago.
 bool applyPowerMode() {
     SleepSettings settings;
-    settings.dimAfterMs = kDimAfterMs;
     settings.sleepAfterMs = kSleepAfterMs;
 
     BatteryReading battery = batteryReading();
@@ -205,14 +198,9 @@ bool applyPowerMode() {
     // USB and has nothing to conserve.
     inputs.externallyPowered = battery.charging || battery.percent < 0;
 
-    PowerMode next = nextPowerMode(settings, inputs);
-    if (next == PowerMode::Asleep) {
+    if (nextPowerMode(settings, inputs) == PowerMode::Asleep) {
         enterSleep();
         return true;
-    }
-    if (next != powerMode) {
-        displaySetDimmed(next == PowerMode::Dimmed);
-        powerMode = next;
     }
     return false;
 }
@@ -269,15 +257,10 @@ void loop() {
     // fetches, which is when the battery voltage reads true.
     batteryPoll();
 
-    // Any press counts as use, whichever action it turns out to be, and takes
-    // the backlight straight back up so the screen responds before the button
-    // is even released.
+    // Any press counts as use, whichever action it turns out to be, so the
+    // idle clock restarts before the button is even released.
     if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
         noteInteraction();
-        if (powerMode != PowerMode::Awake) {
-            displaySetDimmed(false);
-            powerMode = PowerMode::Awake;
-        }
     }
 
     if (M5.BtnB.wasHold()) {
