@@ -21,6 +21,13 @@ constexpr int kServiceColX = 4;
 constexpr int kEtaColX[kArrivalsPerService] = {119, 178, 236};
 constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
 
+// Backlight levels, 0-255. Full is set explicitly at boot rather than left to
+// M5Unified's default so that undimming has a known level to return to. The
+// dim level is low enough to be a clear saving and a visible warning that the
+// screen is about to go, but still readable indoors.
+constexpr uint8_t kBrightnessFull = 128;
+constexpr uint8_t kBrightnessDim = 16;
+
 // Each arrival is tinted by how full that bus is. Colour carries the load and
 // nothing else, so an arriving bus is left to read as "Arr" on its own.
 uint16_t loadColor(BusLoad load) {
@@ -112,10 +119,34 @@ void drawBattery(const BatteryReading& battery) {
 
 void displaySetup() {
     M5.Display.setRotation(1);
+    M5.Display.setBrightness(kBrightnessFull);
     canvas.setColorDepth(8);
     canvas.createSprite(kScreenWidth, kScreenHeight);
     canvas.setTextFont(kDefaultTextFont);
     canvas.setTextSize(1);
+}
+
+void displaySetDimmed(bool dimmed) {
+    M5.Display.setBrightness(dimmed ? kBrightnessDim : kBrightnessFull);
+}
+
+void displaySleep() {
+    // Clear before sleeping: the panel keeps its own frame buffer, so whatever
+    // was last pushed would otherwise flash back up on wake, showing arrival
+    // times that are by then minutes stale.
+    canvas.fillSprite(TFT_BLACK);
+    canvas.pushSprite(0, 0);
+    // Takes the backlight to zero itself, and remembers the level to restore.
+    // Setting the brightness to 0 here instead would make that remembered
+    // level 0, and the panel would wake up black.
+    M5.Display.sleep();
+}
+
+void displayWake() {
+    M5.Display.wakeup();
+    // wakeup() restores whatever level was set last, which is the dim one when
+    // the device dozed off rather than being sent to sleep by hand.
+    M5.Display.setBrightness(kBrightnessFull);
 }
 
 void displayShowStatus(const std::string& message) {

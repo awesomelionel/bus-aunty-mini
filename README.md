@@ -19,7 +19,9 @@ Buttons:
 | Button | Action |
 | --- | --- |
 | KEY1, front (`M5.BtnA`) | Press to cycle to the next configured stop and fetch it immediately |
+| KEY1, front (`M5.BtnA`) | Hold 1.5s to sleep now |
 | KEY2, side (`M5.BtnB`) | Hold 3s to reopen the setup portal and edit stops or WiFi |
+| Either button | Press to wake from sleep |
 
 ## Prerequisites
 
@@ -40,17 +42,18 @@ pio run -e sticks3 -t upload -t monitor  # build + flash + open serial monitor
 ## Run the unit tests
 
 The pure logic in `src/core/` (ISO-8601 parsing, ETA formatting, JSON parsing,
-bus stop config validation) runs as host-native unit tests — no device needed:
+bus stop config validation, the sleep/dim decision) runs as host-native unit
+tests — no device needed:
 
 ```bash
 cd firmware
 pio test -e native
 ```
 
-The `native` environment excludes `main.cpp`, `src/net/`, `src/storage/` and
-`src/ui/`, so WiFi provisioning, HTTPS fetch, NVS storage, display rendering
-and button input aren't covered by these tests and have to be checked on
-device.
+The `native` environment excludes `main.cpp`, `src/net/`, `src/power/`,
+`src/storage/` and `src/ui/`, so WiFi provisioning, HTTPS fetch, NVS storage,
+display rendering, light sleep and button input aren't covered by these tests
+and have to be checked on device.
 
 ## First-time setup
 
@@ -93,9 +96,49 @@ rendered as minutes from now — `Due` for anything at or before now, `Nm` up to
 an hour, `60+` beyond that, and `--` when the API gave no time for that slot.
 
 Everything else is a full-screen status message: connecting to WiFi, syncing
-time, loading a stop, WiFi lost and reconnecting, or an error (`No data for X`
-for an HTTP 404, `Fetch failed (<status>)` otherwise, `Bad response for X` for
-unparseable JSON, `X: no services` when the stop has none).
+time, loading a stop, WiFi lost and reconnecting, going to sleep and waking up,
+or an error (`No data for X` for an HTTP 404, `Fetch failed (<status>)`
+otherwise, `Bad response for X` for unparseable JSON, `X: no services` when the
+stop has none).
+
+## Sleep mode
+
+On battery, the device does not stay lit and polling while nobody is looking at
+it. Two idle stages, both counted from the last button press:
+
+| Idle for | What happens |
+| --- | --- |
+| 30s | The backlight dims. The screen stays live and polling carries on |
+| 2 min | `Sleeping...`, then the screen and the WiFi radio go off |
+
+Holding KEY1 for 1.5 seconds sleeps immediately, without waiting out the
+timeout. Pressing either button wakes the device: it restores the screen,
+reconnects, and fetches the current stop straight away rather than showing the
+arrival times it had before it went down, which by then are minutes stale. The
+press that wakes it does nothing else — it will not also page or change stop.
+
+The device sleeps by light-sleeping the SoC with both buttons armed as wake
+sources, rather than deep-sleeping it. RAM survives, so the configured stops
+stay loaded, and the RTC keeps counting, so the NTP-synced clock is still right
+on the other side; waking costs a WiFi reconnect (a second or two) instead of a
+full boot and re-sync. Deep sleep would save roughly another 200µA, which on
+this battery is not worth paying for on every glance at the screen.
+
+Nothing sleeps while the device is externally powered — there is no battery to
+conserve, and a display wired to USB is meant to stay on. "Externally powered"
+is read from the PMIC as charging, or as no battery being attached, so a device
+sitting on USB with a *fully charged* battery may report neither and still doze
+off. One press brings it back.
+
+The timings, the dim level and the hold-to-sleep threshold are compile-time
+constants: `kDimAfterMs`, `kSleepAfterMs` and `kSleepHoldMs` in
+`src/main.cpp`, and `kBrightnessFull`/`kBrightnessDim` in `src/ui/display.cpp`.
+The decision itself — awake, dimmed or asleep — is pure logic in
+`src/core/sleep_policy.cpp` and is covered by the native unit tests; the
+light-sleep and wake-source handling in `src/power/` is hardware-facing and has
+to be checked on device.
+
+## Battery indicator
 
 The battery percentage comes from the PMIC's voltage reading, which sags while
 WiFi transmits, so it's sampled every 2 seconds between fetches and smoothed

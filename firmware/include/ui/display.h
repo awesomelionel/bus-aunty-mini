@@ -11,6 +11,13 @@
 constexpr size_t kServicesPerScreen = 6;
 
 void displaySetup();
+// Drops the backlight to the dim level, or takes it back to full. Whatever is
+// on screen stays on screen and stays live.
+void displaySetDimmed(bool dimmed);
+// Blanks the panel and puts it in its own low-power state. Nothing drawn while
+// asleep reaches the screen, so callers should not bother drawing.
+void displaySleep();
+void displayWake();
 void displayShowStatus(const std::string& message);
 void displayShowWifiSetup(const std::string& ssid);
 void displayShowNoStops(const std::string& ssid);

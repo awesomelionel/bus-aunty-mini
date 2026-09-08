@@ -9,8 +9,10 @@
 
 #include "core/arrival_parser.h"
 #include "core/bus_stop_config.h"
+#include "core/sleep_policy.h"
 #include "net/bus_api_client.h"
 #include "net/wifi_portal.h"
+#include "power/sleep.h"
 #include "storage/bus_stop_store.h"
 #include "ui/battery.h"
 #include "ui/display.h"
@@ -19,13 +21,30 @@ namespace {
 
 constexpr uint32_t kPollIntervalMs = 30000;
 constexpr uint32_t kPortalHoldMs = 3000;
+constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
+
+// Long enough to read the screen and page through a couple of stops without it
+// dimming under you, short enough that a device left face-up on a table is not
+// still lit and polling a minute later.
+constexpr uint32_t kDimAfterMs = 30000;
+constexpr uint32_t kSleepAfterMs = 120000;
+// How long "Sleeping..." stays up, so the screen going black reads as
+// deliberate rather than as a flat battery.
+constexpr uint32_t kSleepNoticeMs = 700;
+
+// Waiting on WiFi here rather than falling through to the loop's reconnect
+// branch, which would flash "WiFi lost" every time the device woke up.
+constexpr uint32_t kWakeReconnectTimeoutMs = 8000;
 
 std::vector<BusStopConfig> busStops;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
 bool noStopsRendered = false;
+
+uint32_t lastInteractionMillis = 0;
+PowerMode powerMode = PowerMode::Awake;
 
 // The last fetch is kept so paging through a long service list re-renders
 // locally instead of hitting the API again on every button press.
@@ -133,6 +152,71 @@ void pollAndRender() {
     renderCachedPage();
 }
 
+void noteInteraction() { lastInteractionMillis = millis(); }
+
+// Blanks the screen, drops the radio, and blocks until a button is pressed.
+void enterSleep() {
+    // Back to full brightness first: on the idle path the screen is already
+    // dimmed, and the notice is the one thing here that has to be read.
+    displaySetDimmed(false);
+    displayShowStatus("Sleeping...");
+    delay(kSleepNoticeMs);
+    displaySleep();
+
+    // The radio is the largest draw by far, and WiFiManager left the
+    // credentials in NVS, so dropping it costs only the reconnect below.
+    WiFi.disconnect(/*wifioff=*/true, /*eraseap=*/false);
+
+    powerSleepUntilButtonPress();
+
+    displayWake();
+    displayShowStatus("Waking up...");
+    WiFi.mode(WIFI_STA);
+    WiFi.begin();
+    uint32_t startedAt = millis();
+    while (WiFi.status() != WL_CONNECTED &&
+           millis() - startedAt < kWakeReconnectTimeoutMs) {
+        delay(100);
+    }
+
+    // However long the device was away, the cached arrivals have expired, and
+    // the screen was cleared before sleeping, so everything is redrawn.
+    cachedServices.clear();
+    currentPage = 0;
+    noStopsRendered = false;
+    needsImmediateFetch = true;
+    lastPollMillis = millis();
+    powerMode = PowerMode::Awake;
+    noteInteraction();
+}
+
+// Returns true when the device slept, so the caller can drop the rest of the
+// iteration rather than act on button state read minutes ago.
+bool applyPowerMode() {
+    SleepSettings settings;
+    settings.dimAfterMs = kDimAfterMs;
+    settings.sleepAfterMs = kSleepAfterMs;
+
+    BatteryReading battery = batteryReading();
+    IdleInputs inputs;
+    inputs.nowMs = millis();
+    inputs.lastInteractionMs = lastInteractionMillis;
+    // A negative percentage means no battery is attached, so the device is on
+    // USB and has nothing to conserve.
+    inputs.externallyPowered = battery.charging || battery.percent < 0;
+
+    PowerMode next = nextPowerMode(settings, inputs);
+    if (next == PowerMode::Asleep) {
+        enterSleep();
+        return true;
+    }
+    if (next != powerMode) {
+        displaySetDimmed(next == PowerMode::Dimmed);
+        powerMode = next;
+    }
+    return false;
+}
+
 // Reopens the captive portal so stops can be edited after the initial setup.
 void openConfigPortal() {
     std::string before = serializeBusStops(busStops);
@@ -147,6 +231,7 @@ void openConfigPortal() {
     noStopsRendered = false;
     needsImmediateFetch = true;
     lastPollMillis = millis();
+    noteInteraction();
 }
 
 }  // namespace
@@ -155,6 +240,7 @@ void setup() {
     Serial.begin(115200);
     auto cfg = M5.config();
     M5.begin(cfg);
+    M5.BtnA.setHoldThresh(kSleepHoldMs);
     M5.BtnB.setHoldThresh(kPortalHoldMs);
     displaySetup();
 
@@ -172,6 +258,9 @@ void setup() {
     persistStopsIfChanged(savedStops);
 
     syncTime();
+    // Start the idle clock once the device is actually usable: WiFi setup and
+    // the NTP sync can take longer than the dim delay on their own.
+    noteInteraction();
 }
 
 void loop() {
@@ -180,8 +269,30 @@ void loop() {
     // fetches, which is when the battery voltage reads true.
     batteryPoll();
 
+    // Any press counts as use, whichever action it turns out to be, and takes
+    // the backlight straight back up so the screen responds before the button
+    // is even released.
+    if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+        noteInteraction();
+        if (powerMode != PowerMode::Awake) {
+            displaySetDimmed(false);
+            powerMode = PowerMode::Awake;
+        }
+    }
+
     if (M5.BtnB.wasHold()) {
         openConfigPortal();
+        return;
+    }
+
+    // Held rather than clicked, so putting the device away deliberately does
+    // not collide with paging through stops.
+    if (M5.BtnA.wasHold()) {
+        enterSleep();
+        return;
+    }
+
+    if (applyPowerMode()) {
         return;
     }
 
@@ -194,8 +305,9 @@ void loop() {
         return;
     }
 
-    // Btn A walks the current stop's remaining pages before moving on.
-    if (M5.BtnA.wasPressed()) {
+    // Btn A walks the current stop's remaining pages before moving on. Read on
+    // release, so a hold is only ever the sleep gesture.
+    if (M5.BtnA.wasClicked()) {
         size_t totalPages =
             servicePageCount(cachedServices.size(), kServicesPerScreen);
         if (currentPage + 1 < totalPages) {
