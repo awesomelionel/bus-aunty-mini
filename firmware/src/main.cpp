@@ -238,11 +238,11 @@ void openConfigPortal() {
 
 void setup() {
     Serial.begin(115200);
-    auto cfg = M5.config();
-    M5.begin(cfg);
+    // Brings the board up as a side effect, so it comes before anything that
+    // touches the buttons or the PMIC.
+    displaySetup();
     M5.BtnA.setHoldThresh(kSleepHoldMs);
     M5.BtnB.setHoldThresh(kPortalHoldMs);
-    displaySetup();
 
     busStops = loadBusStops();
     std::string savedStops = serializeBusStops(busStops);

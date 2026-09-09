@@ -1,38 +1,30 @@
 // firmware/src/ui/display.cpp
 #include "ui/display.h"
 
-#include <M5Unified.h>
-
 #include <vector>
 
 #include "board/board.h"
 #include "core/eta_format.h"
 #include "core/layout.h"
+#include "hal/display_device.h"
 #include "ui/wifi_image.h"
 
 namespace {
 
-M5Canvas canvas(&M5.Display);
+// Bound to the panel here rather than in displaySetup() because M5Canvas
+// takes its PSRAM preference from the parent at construction. The sprite
+// itself is not allocated until createSprite() below, and neither this nor
+// hal::gfx() touches the hardware, so binding at static-init is safe.
+hal::Canvas canvas(&hal::gfx());
 
 // Measured once in displaySetup(), because the row height it is derived from
 // needs the arrivals font, and a font needs a live device.
 ArrivalsLayout arrivalsLayout;
 
-constexpr int kScreenWidth = 240;
-constexpr int kScreenHeight = 135;
-constexpr int kServiceColX = 4;
-// Right edges of the three ETA columns, spread across the space left after
-// the service number rather than packed against the right edge. At 18px the
-// widest ETA ("60+") is 40px, so this leaves an 18px gutter between columns.
-constexpr int kEtaColX[kArrivalsPerService] = {119, 178, 236};
-constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
+int screenWidth() { return board().screenWidth; }
+int screenHeight() { return board().screenHeight; }
 
-// Backlight levels, 0-255. Full is set explicitly at boot rather than left to
-// M5Unified's default so that undimming has a known level to return to. The
-// dim level is low enough to be a clear saving and a visible warning that the
-// screen is about to go, but still readable indoors.
-constexpr uint8_t kBrightnessFull = 128;
-constexpr uint8_t kBrightnessDim = 16;
+constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
 
 // Each arrival is tinted by how full that bus is. Colour carries the load and
 // nothing else, so an arriving bus is left to read as "Arr" on its own.
@@ -58,14 +50,15 @@ constexpr int kWifiIconInkHeight = 68;
 constexpr float kWifiIconScale = 0.25f;
 constexpr int kWifiIconTextGap = 12;
 
-// Six 18px rows plus the header end at y=126, leaving 9px for an indicator
-// that shows which page of a long service list is on screen.
+// The service rows and the header end a few pixels short of the bottom edge,
+// leaving room for an indicator that shows which page of a long service list
+// is on screen.
 void drawPageDots(size_t currentPage, size_t totalPages) {
     constexpr int kDotRadius = 2;
     constexpr int kDotSpacing = 8;
 
-    int y = kScreenHeight - kDotRadius - 2;
-    int x = kScreenWidth / 2 -
+    int y = arrivalsLayout.pageDotsY;
+    int x = screenWidth() / 2 -
             (static_cast<int>(totalPages - 1) * kDotSpacing) / 2;
     for (size_t i = 0; i < totalPages; ++i) {
         if (i == currentPage) {
@@ -91,10 +84,10 @@ constexpr int kHeaderRightPad =
 
 void drawBattery(const BatteryReading& battery) {
     if (battery.percent < 0) {
-        return;  // running off USB with no battery attached
+        return;  // nothing read yet, or no battery this board can see
     }
 
-    int x = kScreenWidth - kBatteryBodyWidth - kBatteryTipWidth -
+    int x = screenWidth() - kBatteryBodyWidth - kBatteryTipWidth -
             kBatteryRightMargin;
     canvas.drawRect(x, kBatteryY, kBatteryBodyWidth, kBatteryHeight, TFT_WHITE);
     canvas.fillRect(x + kBatteryBodyWidth,
@@ -124,15 +117,15 @@ void drawBattery(const BatteryReading& battery) {
 }  // namespace
 
 void displaySetup() {
-    M5.Display.setRotation(1);
-    M5.Display.setBrightness(kBrightnessFull);
+    hal::displayDeviceBegin();
+
     canvas.setColorDepth(8);
-    canvas.createSprite(kScreenWidth, kScreenHeight);
+    canvas.createSprite(screenWidth(), screenHeight());
 
     // The arrivals rows are DejaVu18, so the layout is measured with that font
     // selected before the shared default goes back on.
     canvas.setFont(&fonts::DejaVu18);
-    arrivalsLayout = computeArrivalsLayout(kScreenWidth, kScreenHeight,
+    arrivalsLayout = computeArrivalsLayout(screenWidth(), screenHeight(),
                                            canvas.fontHeight(),
                                            kHeaderRightPad);
 
@@ -143,7 +136,8 @@ void displaySetup() {
 size_t servicesPerScreen() { return arrivalsLayout.servicesPerScreen; }
 
 void displaySetDimmed(bool dimmed) {
-    M5.Display.setBrightness(dimmed ? kBrightnessDim : kBrightnessFull);
+    hal::displayDeviceSetBrightness(dimmed ? board().brightnessDim
+                                           : board().brightnessFull);
 }
 
 void displaySleep() {
@@ -152,18 +146,10 @@ void displaySleep() {
     // times that are by then minutes stale.
     canvas.fillSprite(TFT_BLACK);
     canvas.pushSprite(0, 0);
-    // Takes the backlight to zero itself, and remembers the level to restore.
-    // Setting the brightness to 0 here instead would make that remembered
-    // level 0, and the panel would wake up black.
-    M5.Display.sleep();
+    hal::displayDeviceSleep();
 }
 
-void displayWake() {
-    M5.Display.wakeup();
-    // wakeup() restores whatever level was set last, which is the dim one when
-    // the device dozed off rather than being sent to sleep by hand.
-    M5.Display.setBrightness(kBrightnessFull);
-}
+void displayWake() { hal::displayDeviceWake(); }
 
 void displayShowStatus(const std::string& message) {
     canvas.fillSprite(TFT_BLACK);
@@ -184,11 +170,11 @@ void displayShowStatus(const std::string& message) {
 
     int lineHeight = canvas.fontHeight();
     int totalHeight = lineHeight * static_cast<int>(lines.size());
-    int firstLineY = (kScreenHeight - totalHeight) / 2 + lineHeight / 2;
+    int firstLineY = (screenHeight() - totalHeight) / 2 + lineHeight / 2;
 
     for (size_t i = 0; i < lines.size(); ++i) {
         int y = firstLineY + static_cast<int>(i) * lineHeight;
-        canvas.drawString(lines[i].c_str(), kScreenWidth / 2, y);
+        canvas.drawString(lines[i].c_str(), screenWidth() / 2, y);
     }
 
     canvas.pushSprite(0, 0);
@@ -205,11 +191,11 @@ void displayShowWifiSetup(const std::string& ssid) {
     int lineHeight = canvas.fontHeight();
     int iconHeight = static_cast<int>(kWifiIconInkHeight * kWifiIconScale + 0.5f);
     int blockHeight = iconHeight + kWifiIconTextGap + lineHeight * 2;
-    int iconY = (kScreenHeight - blockHeight) / 2;
+    int iconY = (screenHeight() - blockHeight) / 2;
 
     // Shrinking the arcs this far needs antialiasing, which only works from a
     // sprite source, so the cropped bitmap is staged before being zoomed down.
-    M5Canvas icon(&canvas);
+    hal::Canvas icon(&canvas);
     icon.setColorDepth(8);
     if (icon.createSprite(WIFIIMAGE_WIDTH, kWifiIconInkHeight)) {
         icon.fillSprite(TFT_BLACK);
@@ -217,15 +203,15 @@ void displayShowWifiSetup(const std::string& ssid) {
                         epd_bitmap_WifiImage + kWifiIconInkTop * kWifiIconRowBytes,
                         WIFIIMAGE_WIDTH, kWifiIconInkHeight, TFT_WHITE);
         icon.setPivot(WIFIIMAGE_WIDTH / 2.0f, kWifiIconInkHeight / 2.0f);
-        icon.pushRotateZoomWithAA(&canvas, kScreenWidth / 2.0f,
+        icon.pushRotateZoomWithAA(&canvas, screenWidth() / 2.0f,
                                   iconY + iconHeight / 2.0f, 0.0f,
                                   kWifiIconScale, kWifiIconScale, TFT_BLACK);
         icon.deleteSprite();
     }
 
     int textY = iconY + iconHeight + kWifiIconTextGap;
-    canvas.drawString("Connect WiFi to:", kScreenWidth / 2, textY);
-    canvas.drawString(ssid.c_str(), kScreenWidth / 2, textY + lineHeight);
+    canvas.drawString("Connect WiFi to:", screenWidth() / 2, textY);
+    canvas.drawString(ssid.c_str(), screenWidth() / 2, textY + lineHeight);
 
     canvas.pushSprite(0, 0);
     canvas.setTextFont(kDefaultTextFont);
@@ -237,13 +223,15 @@ void displayShowNoStops(const std::string& ssid) {
     canvas.setTextDatum(top_center);
 
     int lineHeight = canvas.fontHeight();
-    const std::string lines[] = {"No bus stops yet", "Hold Btn B, then",
-                                 "join WiFi:", ssid};
+    const std::string holdLine =
+        std::string("Hold ") + board().secondaryButtonLabel + ", then";
+    const std::string lines[] = {"No bus stops yet", holdLine, "join WiFi:",
+                                 ssid};
     int count = static_cast<int>(sizeof(lines) / sizeof(lines[0]));
-    int firstLineY = (kScreenHeight - lineHeight * count) / 2;
+    int firstLineY = (screenHeight() - lineHeight * count) / 2;
 
     for (int i = 0; i < count; ++i) {
-        canvas.drawString(lines[i].c_str(), kScreenWidth / 2,
+        canvas.drawString(lines[i].c_str(), screenWidth() / 2,
                           firstLineY + i * lineHeight);
     }
 
@@ -260,13 +248,13 @@ void displayShowArrivals(const std::string& stopLabel,
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
     // The header takes the first row, leaving the layout's row count below it.
-    int rowHeight = arrivalsLayout.rowHeight;
+    const int rowHeight = arrivalsLayout.rowHeight;
 
     canvas.setTextDatum(top_center);
     std::string header = stopLabel + " (" +
                           std::to_string(currentStopIndex + 1) + "/" +
                           std::to_string(totalStops) + ")";
-    canvas.drawString(header.c_str(), (kScreenWidth - kHeaderRightPad) / 2, 0);
+    canvas.drawString(header.c_str(), arrivalsLayout.headerCenterX, 0);
 
     drawBattery(battery);
 
@@ -277,7 +265,7 @@ void displayShowArrivals(const std::string& stopLabel,
 
         canvas.setTextColor(TFT_WHITE, TFT_BLACK);
         canvas.setTextDatum(top_left);
-        canvas.drawString(svc.serviceNo.c_str(), kServiceColX, y);
+        canvas.drawString(svc.serviceNo.c_str(), arrivalsLayout.serviceColX, y);
 
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
@@ -288,14 +276,15 @@ void displayShowArrivals(const std::string& stopLabel,
             // the second pass below depends on. Safe because every frame
             // starts from a cleared sprite.
             canvas.setTextColor(loadColor(arrival.load));
-            canvas.drawString(eta.c_str(), kEtaColX[col], y);
+            canvas.drawString(eta.c_str(), arrivalsLayout.etaColRightX[col], y);
 
             // Colour is spoken for by load, so an arriving bus is emphasised
             // by weight: overdrawing a pixel to the left thickens the stems.
             // Leftward because the columns are right-aligned, so that is
             // where the spare room is.
             if (eta == kEtaArrivingLabel) {
-                canvas.drawString(eta.c_str(), kEtaColX[col] - 1, y);
+                canvas.drawString(eta.c_str(),
+                                  arrivalsLayout.etaColRightX[col] - 1, y);
             }
         }
     }
