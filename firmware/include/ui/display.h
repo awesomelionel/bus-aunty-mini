@@ -7,10 +7,11 @@
 #include "core/arrival_parser.h"
 #include "ui/battery.h"
 
-// How many service rows fit under the header at the arrivals font size.
-constexpr size_t kServicesPerScreen = 6;
-
 void displaySetup();
+// How many service rows fit under the header at the arrivals font size.
+// Depends on the panel's height and the font's measured row height, so it is
+// only meaningful after displaySetup().
+size_t servicesPerScreen();
 // Drops the backlight to the dim level, or takes it back to full. Whatever is
 // on screen stays on screen and stays live.
 void displaySetDimmed(bool dimmed);

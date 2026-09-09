@@ -107,9 +107,9 @@ void syncTime() {
 
 void renderCachedPage() {
     size_t totalPages =
-        servicePageCount(cachedServices.size(), kServicesPerScreen);
+        servicePageCount(cachedServices.size(), servicesPerScreen());
     std::vector<BusService> page =
-        selectServicePage(cachedServices, kServicesPerScreen, currentPage);
+        selectServicePage(cachedServices, servicesPerScreen(), currentPage);
     displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
                          batteryReading());
@@ -146,7 +146,7 @@ void pollAndRender() {
     cachedServices = parsed.services;
     cachedLabel = label;
     if (currentPage >=
-        servicePageCount(cachedServices.size(), kServicesPerScreen)) {
+        servicePageCount(cachedServices.size(), servicesPerScreen())) {
         currentPage = 0;
     }
     renderCachedPage();
@@ -309,7 +309,7 @@ void loop() {
     // release, so a hold is only ever the sleep gesture.
     if (M5.BtnA.wasClicked()) {
         size_t totalPages =
-            servicePageCount(cachedServices.size(), kServicesPerScreen);
+            servicePageCount(cachedServices.size(), servicesPerScreen());
         if (currentPage + 1 < totalPages) {
             ++currentPage;
             renderCachedPage();

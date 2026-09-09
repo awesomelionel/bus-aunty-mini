@@ -5,12 +5,18 @@
 
 #include <vector>
 
+#include "board/board.h"
 #include "core/eta_format.h"
+#include "core/layout.h"
 #include "ui/wifi_image.h"
 
 namespace {
 
 M5Canvas canvas(&M5.Display);
+
+// Measured once in displaySetup(), because the row height it is derived from
+// needs the arrivals font, and a font needs a live device.
+ArrivalsLayout arrivalsLayout;
 
 constexpr int kScreenWidth = 240;
 constexpr int kScreenHeight = 135;
@@ -122,9 +128,19 @@ void displaySetup() {
     M5.Display.setBrightness(kBrightnessFull);
     canvas.setColorDepth(8);
     canvas.createSprite(kScreenWidth, kScreenHeight);
+
+    // The arrivals rows are DejaVu18, so the layout is measured with that font
+    // selected before the shared default goes back on.
+    canvas.setFont(&fonts::DejaVu18);
+    arrivalsLayout = computeArrivalsLayout(kScreenWidth, kScreenHeight,
+                                           canvas.fontHeight(),
+                                           kHeaderRightPad);
+
     canvas.setTextFont(kDefaultTextFont);
     canvas.setTextSize(1);
 }
+
+size_t servicesPerScreen() { return arrivalsLayout.servicesPerScreen; }
 
 void displaySetDimmed(bool dimmed) {
     M5.Display.setBrightness(dimmed ? kBrightnessDim : kBrightnessFull);
@@ -243,8 +259,8 @@ void displayShowArrivals(const std::string& stopLabel,
     canvas.setFont(&fonts::DejaVu18);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
-    // The header takes the first row, leaving exactly kServicesPerScreen rows.
-    int rowHeight = canvas.fontHeight();
+    // The header takes the first row, leaving the layout's row count below it.
+    int rowHeight = arrivalsLayout.rowHeight;
 
     canvas.setTextDatum(top_center);
     std::string header = stopLabel + " (" +
@@ -254,7 +270,8 @@ void displayShowArrivals(const std::string& stopLabel,
 
     drawBattery(battery);
 
-    for (size_t i = 0; i < services.size() && i < kServicesPerScreen; ++i) {
+    for (size_t i = 0;
+         i < services.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
         int y = rowHeight + static_cast<int>(i) * rowHeight;
         const BusService& svc = services[i];
 
