@@ -64,20 +64,11 @@ bool wasClicked(Button button) {
 }
 
 bool wasHold(Button button) {
-    if (button == Button::Sleep) {
-        // D0 is the BOOT pin: holding it across a reset drops the board into
-        // the ROM bootloader, so it is deliberately given no hold gesture and
-        // acts on the press instead.
-        return false;
-    }
     const ButtonGesture* gesture = gestureFor(button);
     return gesture != nullptr && gesture->wasHold();
 }
 
 void setHoldThreshold(Button button, uint32_t holdThresholdMs) {
-    if (button == Button::Sleep) {
-        return;  // no hold gesture to configure; see wasHold above
-    }
     if (ButtonGesture* gesture = gestureFor(button)) {
         gesture->setHoldThreshold(holdThresholdMs);
     }

@@ -2,6 +2,15 @@
 #pragma once
 #include <cstdint>
 
+// How the UI points the user at a button. Boards whose buttons carry a name
+// you can actually read while the device is in use get named; on boards where
+// the silkscreen is on the back, or too small to find in a hurry, an arrow
+// pointing at the button's edge of the screen is far clearer.
+enum class ButtonHint {
+    Name,
+    ArrowDown,  // the button sits along the bottom edge
+};
+
 // Everything the shared UI and main loop need to know about the board they
 // happen to be running on. One instance per board, defined in
 // src/hal/<board>/board.cpp and selected at build time by build_src_filter,
@@ -24,9 +33,12 @@ struct BoardProfile {
     uint8_t brightnessFull;
     uint8_t brightnessDim;
 
-    // What to call the buttons on screen: "Btn A"/"Btn B" vs "D1"/"D2".
+    // What to call the buttons on screen: "Btn A"/"Btn B" vs "D1"/"D0".
     const char* primaryButtonLabel;
     const char* secondaryButtonLabel;
+    // Whether the secondary button's on-screen prompt uses that label or an
+    // arrow. It is the only button the UI ever has to ask for by name.
+    ButtonHint secondaryButtonHint;
 
     // True when the board has a dedicated button that sleeps on a single
     // press, in addition to the hold-the-primary-button gesture.

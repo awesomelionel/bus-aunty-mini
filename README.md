@@ -30,9 +30,20 @@ Buttons, by role rather than by name:
 | Role | StickS3 | Feather | Action |
 | --- | --- | --- | --- |
 | Primary | KEY1, front | D1 | Press to page through the current stop's services, then move to the next stop. Hold 1.5s to sleep now |
-| Secondary | KEY2, side | D2 | Hold 3s to reopen the setup portal and edit stops or WiFi |
-| Sleep | — | D0 | Press to sleep now. No hold gesture: D0 is also the BOOT pin |
+| Secondary | KEY2, side | D0 | Hold 3s to reopen the setup portal and edit stops or WiFi |
+| Sleep | — | D2 | Press to sleep now |
 | Any button | | | Press to wake from sleep |
+
+The Feather's D0/D1/D2 silkscreen is on the *back* of the board, so a user
+looking at the screen cannot tell the buttons apart. The portal gesture is
+therefore on D0 and the no-stops screen prompts with a downward arrow pointing
+at the bottom edge rather than naming the button. Which of the two styles a
+board uses is `secondaryButtonHint` on its `BoardProfile`.
+
+D0 is also the BOOT pin, and it carries a hold gesture anyway: the ROM
+bootloader is only entered by holding D0 *across a reset*, so a three-second
+hold during normal operation is safe. A device that happens to reset mid-hold
+comes up in bootloader mode, which a power cycle undoes.
 
 ## Prerequisites
 
@@ -118,11 +129,11 @@ each with:
 The same page carries the **"Always on (skip dimming and sleep)"** checkbox,
 for devices that live permanently on USB — see [Sleep mode](#sleep-mode).
 
-To change any of this after setup, hold the secondary button (KEY2 on the
-StickS3, D2 on the Feather) for 3 seconds — the portal reopens with your
-current settings pre-filled, and saving writes them back to NVS only if they
-actually changed. With no stops configured, the screen prompts you to do
-exactly this.
+To change any of this after setup, hold the secondary button — KEY2 on the
+StickS3, D0 (the bottom one) on the Feather — for 3 seconds. The portal reopens
+with your current settings pre-filled, and saving writes them back to NVS only
+if they actually changed. With no stops configured, the screen prompts you to
+do exactly this.
 
 ## What's on screen
 
@@ -149,7 +160,7 @@ it. Two idle stages, both counted from the last button press:
 | 2 min | `Sleeping...`, then the screen and the WiFi radio go off |
 
 Holding the primary button for 1.5 seconds sleeps immediately, without waiting
-out the timeout; on the Feather, a single press of D0 does the same. Pressing
+out the timeout; on the Feather, a single press of D2 does the same. Pressing
 any button wakes the device: it restores the screen, reconnects, and fetches
 the current stop straight away rather than showing the arrival times it had
 before it went down, which by then are minutes stale. The press that wakes it

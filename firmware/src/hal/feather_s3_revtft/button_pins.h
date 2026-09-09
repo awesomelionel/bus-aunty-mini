@@ -18,10 +18,17 @@ struct ButtonPin {
 // D1 and D2 are plain GPIOs with no external pull, so they are pulled down
 // internally and read high when pressed. D0 doubles as the BOOT pin and has
 // an external pull-up, so it reads low when pressed.
+//
+// D0 carries the portal gesture despite being BOOT: it is the button a user
+// can be told to find ("the bottom one") without reading the silkscreen on
+// the back of the board. Holding it for three seconds while the firmware is
+// running is harmless -- the ROM bootloader is only entered by holding it
+// *across a reset* -- so the worst case is a device that happens to reset
+// mid-hold coming up in bootloader mode, which a power cycle undoes.
 constexpr ButtonPin kButtonPins[] = {
     {Button::Primary, /*gpio=*/1, /*activeLow=*/false},
-    {Button::Secondary, /*gpio=*/2, /*activeLow=*/false},
-    {Button::Sleep, /*gpio=*/0, /*activeLow=*/true},
+    {Button::Secondary, /*gpio=*/0, /*activeLow=*/true},
+    {Button::Sleep, /*gpio=*/2, /*activeLow=*/false},
 };
 
 }  // namespace hal::feather
