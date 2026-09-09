@@ -11,11 +11,11 @@
 #include "core/bus_stop_config.h"
 #include "core/sleep_policy.h"
 #include "hal/buttons.h"
+#include "hal/power.h"
+#include "hal/sleep.h"
 #include "net/bus_api_client.h"
 #include "net/wifi_portal.h"
-#include "power/sleep.h"
 #include "storage/bus_stop_store.h"
-#include "ui/battery.h"
 #include "ui/display.h"
 
 namespace {
@@ -113,7 +113,7 @@ void renderCachedPage() {
         selectServicePage(cachedServices, servicesPerScreen(), currentPage);
     displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
-                         batteryReading());
+                         hal::powerStatus());
 }
 
 void pollAndRender() {
@@ -168,7 +168,7 @@ void enterSleep() {
     // credentials in NVS, so dropping it costs only the reconnect below.
     WiFi.disconnect(/*wifioff=*/true, /*eraseap=*/false);
 
-    powerSleepUntilButtonPress();
+    hal::sleepUntilButtonPress();
 
     displayWake();
     displayShowStatus("Waking up...");
@@ -198,13 +198,10 @@ bool applyPowerMode() {
     settings.dimAfterMs = kDimAfterMs;
     settings.sleepAfterMs = kSleepAfterMs;
 
-    BatteryReading battery = batteryReading();
     IdleInputs inputs;
     inputs.nowMs = millis();
     inputs.lastInteractionMs = lastInteractionMillis;
-    // A negative percentage means no battery is attached, so the device is on
-    // USB and has nothing to conserve.
-    inputs.externallyPowered = battery.charging || battery.percent < 0;
+    inputs.externallyPowered = hal::powerStatus().externalPower;
 
     PowerMode next = nextPowerMode(settings, inputs);
     if (next == PowerMode::Asleep) {
@@ -241,6 +238,7 @@ void setup() {
     Serial.begin(115200);
     displaySetup();
     hal::buttonsBegin();
+    hal::powerBegin();
     hal::setHoldThreshold(hal::Button::Primary, kSleepHoldMs);
     hal::setHoldThreshold(hal::Button::Secondary, kPortalHoldMs);
 
@@ -267,7 +265,7 @@ void loop() {
     hal::buttonsUpdate();
     // Sampled out here rather than at render time: the loop is idle between
     // fetches, which is when the battery voltage reads true.
-    batteryPoll();
+    hal::powerPoll();
 
     // Any press counts as use, whichever action it turns out to be, and takes
     // the backlight straight back up so the screen responds before the button

@@ -1,7 +1,10 @@
-// firmware/include/power/sleep.h
+// firmware/include/hal/sleep.h
 #pragma once
 
-// Light-sleeps the SoC until KEY1 or KEY2 is pressed, then returns.
+namespace hal {
+
+// Light-sleeps the SoC until one of the board's buttons is pressed, then
+// returns.
 //
 // Light sleep rather than deep sleep: RAM and the peripherals' state survive,
 // so the caller keeps its configured stops and cached arrivals, and the RTC
@@ -12,4 +15,6 @@
 // Blocking, and it swallows the press that woke the device so a wake is not
 // also read as a stop change. The caller is responsible for the screen and
 // the radio: neither is touched here.
-void powerSleepUntilButtonPress();
+void sleepUntilButtonPress();
+
+}  // namespace hal

@@ -82,9 +82,9 @@ constexpr int kBatteryLowPercent = 20;
 constexpr int kHeaderRightPad =
     kBatteryBodyWidth + kBatteryTipWidth + kBatteryRightMargin + 4;
 
-void drawBattery(const BatteryReading& battery) {
-    if (battery.percent < 0) {
-        return;  // nothing read yet, or no battery this board can see
+void drawBattery(const hal::PowerStatus& power) {
+    if (power.percent < 0) {
+        return;  // nothing read yet, or no gauge on this board
     }
 
     int x = screenWidth() - kBatteryBodyWidth - kBatteryTipWidth -
@@ -94,21 +94,21 @@ void drawBattery(const BatteryReading& battery) {
                     kBatteryY + (kBatteryHeight - kBatteryTipHeight) / 2,
                     kBatteryTipWidth, kBatteryTipHeight, TFT_WHITE);
 
-    if (battery.percent == 0) {
+    if (power.percent == 0) {
         return;
     }
     int innerWidth = kBatteryBodyWidth - 2;
     // Keep a sliver visible at low percentages so it stays distinguishable
     // from an empty outline.
-    int fillWidth = (innerWidth * battery.percent + 50) / 100;
+    int fillWidth = (innerWidth * power.percent + 50) / 100;
     if (fillWidth < 1) {
         fillWidth = 1;
     }
 
     uint16_t color = TFT_WHITE;
-    if (battery.charging) {
+    if (power.charging) {
         color = TFT_GREEN;
-    } else if (battery.percent <= kBatteryLowPercent) {
+    } else if (power.percent <= kBatteryLowPercent) {
         color = TFT_RED;
     }
     canvas.fillRect(x + 1, kBatteryY + 1, fillWidth, kBatteryHeight - 2, color);
@@ -242,7 +242,7 @@ void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusService>& services,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
-                          size_t totalPages, const BatteryReading& battery) {
+                          size_t totalPages, const hal::PowerStatus& power) {
     canvas.fillSprite(TFT_BLACK);
     canvas.setFont(&fonts::DejaVu18);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -256,7 +256,7 @@ void displayShowArrivals(const std::string& stopLabel,
                           std::to_string(totalStops) + ")";
     canvas.drawString(header.c_str(), arrivalsLayout.headerCenterX, 0);
 
-    drawBattery(battery);
+    drawBattery(power);
 
     for (size_t i = 0;
          i < services.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
