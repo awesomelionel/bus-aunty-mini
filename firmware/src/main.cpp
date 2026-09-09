@@ -16,6 +16,7 @@
 #include "net/bus_api_client.h"
 #include "net/wifi_portal.h"
 #include "storage/bus_stop_store.h"
+#include "storage/device_settings.h"
 #include "ui/display.h"
 
 namespace {
@@ -39,6 +40,9 @@ constexpr uint32_t kSleepNoticeMs = 700;
 constexpr uint32_t kWakeReconnectTimeoutMs = 8000;
 
 std::vector<BusStopConfig> busStops;
+// Set in the portal for deployments that are permanently plugged in, where
+// dimming and sleeping are a nuisance rather than a saving.
+bool alwaysOn = false;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
@@ -91,6 +95,12 @@ void logWifiDiagnostics() {
 void persistStopsIfChanged(const std::string& before) {
     if (serializeBusStops(busStops) != before) {
         saveBusStops(busStops);
+    }
+}
+
+void persistAlwaysOnIfChanged(bool before) {
+    if (alwaysOn != before) {
+        saveAlwaysOn(alwaysOn);
     }
 }
 
@@ -195,6 +205,7 @@ void enterSleep() {
 // iteration rather than act on button state read minutes ago.
 bool applyPowerMode() {
     SleepSettings settings;
+    settings.enabled = !alwaysOn;
     settings.dimAfterMs = kDimAfterMs;
     settings.sleepAfterMs = kSleepAfterMs;
 
@@ -217,9 +228,11 @@ bool applyPowerMode() {
 
 // Reopens the captive portal so stops can be edited after the initial setup.
 void openConfigPortal() {
-    std::string before = serializeBusStops(busStops);
-    wifiPortalReconfigure(kSetupApSsid, &busStops, onPortalStarted);
-    persistStopsIfChanged(before);
+    std::string beforeStops = serializeBusStops(busStops);
+    bool beforeAlwaysOn = alwaysOn;
+    wifiPortalReconfigure(kSetupApSsid, &busStops, &alwaysOn, onPortalStarted);
+    persistStopsIfChanged(beforeStops);
+    persistAlwaysOnIfChanged(beforeAlwaysOn);
 
     if (currentStopIndex >= busStops.size()) {
         currentStopIndex = 0;
@@ -243,17 +256,21 @@ void setup() {
     hal::setHoldThreshold(hal::Button::Secondary, kPortalHoldMs);
 
     busStops = loadBusStops();
+    alwaysOn = loadAlwaysOn();
     std::string savedStops = serializeBusStops(busStops);
+    bool savedAlwaysOn = alwaysOn;
 
     logWifiDiagnostics();
 
     displayShowStatus("Connecting WiFi...");
-    if (!wifiPortalConnect(kSetupApSsid, &busStops, onPortalStarted)) {
+    if (!wifiPortalConnect(kSetupApSsid, &busStops, &alwaysOn,
+                           onPortalStarted)) {
         displayShowStatus("WiFi setup timed out.\nRestarting...");
         delay(3000);
         ESP.restart();
     }
     persistStopsIfChanged(savedStops);
+    persistAlwaysOnIfChanged(savedAlwaysOn);
 
     syncTime();
     // Start the idle clock once the device is actually usable: WiFi setup and

@@ -29,20 +29,42 @@ constexpr char kCodeAttrs[] =
     "type='text' inputmode='numeric' pattern='[0-9]{3,5}' placeholder='00481'";
 constexpr char kNameAttrs[] = "placeholder='Home'";
 
+// A checkbox submits its value only when ticked, so getValue() comes back as
+// kAlwaysOnTrue or empty. Whether it starts ticked has to be baked into the
+// custom attributes, hence two variants -- and both need static lifetime,
+// like every other pointer handed to WiFiManagerParameter.
+constexpr char kAlwaysOnId[] = "alwayson";
+constexpr char kAlwaysOnLabel[] = "Always on (skip dimming and sleep)";
+constexpr char kAlwaysOnTrue[] = "T";
+constexpr char kAlwaysOnAttrs[] = "type='checkbox'";
+constexpr char kAlwaysOnAttrsChecked[] = "type='checkbox' checked";
+constexpr char kAlwaysOnHtml[] =
+    "<p>Tick this if the device stays plugged in. It cannot always tell mains "
+    "power from a full battery, so left unticked a permanently powered device "
+    "will still dim and sleep.</p>";
+
 constexpr int kCodeFieldLen = static_cast<int>(kBusStopCodeMaxDigits);
 constexpr int kNameFieldLen = static_cast<int>(kBusStopNameMaxChars);
 constexpr unsigned long kPortalTimeoutSec = 180;
 
 // Owns the parameter objects for as long as the portal is running, and reads
 // the submitted values back out afterwards.
-class BusStopForm {
+class PortalForm {
   public:
-    BusStopForm(WiFiManager& wm, const std::vector<BusStopConfig>& seed)
-        : intro_(kIntroHtml) {
+    PortalForm(WiFiManager& wm, const std::vector<BusStopConfig>& seedStops,
+               bool seedAlwaysOn)
+        : intro_(kIntroHtml),
+          alwaysOnHtml_(kAlwaysOnHtml),
+          alwaysOn_(kAlwaysOnId, kAlwaysOnLabel, kAlwaysOnTrue,
+                    sizeof(kAlwaysOnTrue),
+                    seedAlwaysOn ? kAlwaysOnAttrsChecked : kAlwaysOnAttrs,
+                    WFM_LABEL_AFTER) {
         wm.addParameter(&intro_);
         for (size_t i = 0; i < kMaxBusStops; ++i) {
-            const char* code = i < seed.size() ? seed[i].code.c_str() : "";
-            const char* name = i < seed.size() ? seed[i].name.c_str() : "";
+            const char* code =
+                i < seedStops.size() ? seedStops[i].code.c_str() : "";
+            const char* name =
+                i < seedStops.size() ? seedStops[i].name.c_str() : "";
             codes_[i] = std::make_unique<WiFiManagerParameter>(
                 kCodeIds[i], kCodeLabels[i], code, kCodeFieldLen, kCodeAttrs);
             names_[i] = std::make_unique<WiFiManagerParameter>(
@@ -50,6 +72,8 @@ class BusStopForm {
             wm.addParameter(codes_[i].get());
             wm.addParameter(names_[i].get());
         }
+        wm.addParameter(&alwaysOnHtml_);
+        wm.addParameter(&alwaysOn_);
     }
 
     std::vector<BusStopConfig> stops() const {
@@ -61,14 +85,21 @@ class BusStopForm {
         return buildBusStopList(rows);
     }
 
+    bool alwaysOn() const {
+        return alwaysOn_.getValue()[0] == kAlwaysOnTrue[0];
+    }
+
   private:
     WiFiManagerParameter intro_;
     std::array<std::unique_ptr<WiFiManagerParameter>, kMaxBusStops> codes_;
     std::array<std::unique_ptr<WiFiManagerParameter>, kMaxBusStops> names_;
+    WiFiManagerParameter alwaysOnHtml_;
+    WiFiManagerParameter alwaysOn_;
 };
 
 bool runPortal(const char* apSsid, std::vector<BusStopConfig>* stops,
-               const PortalStartedCallback& onPortalStarted, bool onDemand) {
+               bool* alwaysOn, const PortalStartedCallback& onPortalStarted,
+               bool onDemand) {
     WiFiManager wm;
     // Diagnostic: dumps the scan results and the per-attempt connect result,
     // which the display cannot show.
@@ -83,7 +114,7 @@ bool runPortal(const char* apSsid, std::vector<BusStopConfig>* stops,
             [&onPortalStarted](WiFiManager*) { onPortalStarted(); });
     }
 
-    BusStopForm form(wm, *stops);
+    PortalForm form(wm, *stops, *alwaysOn);
     bool saved = false;
     wm.setSaveParamsCallback([&saved]() { saved = true; });
 
@@ -92,6 +123,7 @@ bool runPortal(const char* apSsid, std::vector<BusStopConfig>* stops,
 
     if (saved) {
         *stops = form.stops();
+        *alwaysOn = form.alwaysOn();
     }
     // On the initial run the caller cares about WiFi; on demand it only cares
     // whether the stops were edited.
@@ -101,12 +133,15 @@ bool runPortal(const char* apSsid, std::vector<BusStopConfig>* stops,
 }  // namespace
 
 bool wifiPortalConnect(const char* apSsid, std::vector<BusStopConfig>* stops,
+                       bool* alwaysOn,
                        const PortalStartedCallback& onPortalStarted) {
-    return runPortal(apSsid, stops, onPortalStarted, /*onDemand=*/false);
+    return runPortal(apSsid, stops, alwaysOn, onPortalStarted,
+                     /*onDemand=*/false);
 }
 
 bool wifiPortalReconfigure(const char* apSsid,
-                           std::vector<BusStopConfig>* stops,
+                           std::vector<BusStopConfig>* stops, bool* alwaysOn,
                            const PortalStartedCallback& onPortalStarted) {
-    return runPortal(apSsid, stops, onPortalStarted, /*onDemand=*/true);
+    return runPortal(apSsid, stops, alwaysOn, onPortalStarted,
+                     /*onDemand=*/true);
 }
