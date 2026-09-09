@@ -1,5 +1,5 @@
 // firmware/src/main.cpp
-#include <M5Unified.h>
+#include <Arduino.h>
 #include <WiFi.h>
 #include <esp_system.h>
 #include <time.h>
@@ -10,6 +10,7 @@
 #include "core/arrival_parser.h"
 #include "core/bus_stop_config.h"
 #include "core/sleep_policy.h"
+#include "hal/buttons.h"
 #include "net/bus_api_client.h"
 #include "net/wifi_portal.h"
 #include "power/sleep.h"
@@ -238,11 +239,10 @@ void openConfigPortal() {
 
 void setup() {
     Serial.begin(115200);
-    // Brings the board up as a side effect, so it comes before anything that
-    // touches the buttons or the PMIC.
     displaySetup();
-    M5.BtnA.setHoldThresh(kSleepHoldMs);
-    M5.BtnB.setHoldThresh(kPortalHoldMs);
+    hal::buttonsBegin();
+    hal::setHoldThreshold(hal::Button::Primary, kSleepHoldMs);
+    hal::setHoldThreshold(hal::Button::Secondary, kPortalHoldMs);
 
     busStops = loadBusStops();
     std::string savedStops = serializeBusStops(busStops);
@@ -264,7 +264,7 @@ void setup() {
 }
 
 void loop() {
-    M5.update();
+    hal::buttonsUpdate();
     // Sampled out here rather than at render time: the loop is idle between
     // fetches, which is when the battery voltage reads true.
     batteryPoll();
@@ -272,7 +272,9 @@ void loop() {
     // Any press counts as use, whichever action it turns out to be, and takes
     // the backlight straight back up so the screen responds before the button
     // is even released.
-    if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+    if (hal::wasPressed(hal::Button::Primary) ||
+        hal::wasPressed(hal::Button::Secondary) ||
+        hal::wasPressed(hal::Button::Sleep)) {
         noteInteraction();
         if (powerMode != PowerMode::Awake) {
             displaySetDimmed(false);
@@ -280,14 +282,21 @@ void loop() {
         }
     }
 
-    if (M5.BtnB.wasHold()) {
+    if (hal::wasHold(hal::Button::Secondary)) {
         openConfigPortal();
         return;
     }
 
     // Held rather than clicked, so putting the device away deliberately does
     // not collide with paging through stops.
-    if (M5.BtnA.wasHold()) {
+    if (hal::wasHold(hal::Button::Primary)) {
+        enterSleep();
+        return;
+    }
+
+    // Boards with a button to spare sleep on a single press of it. It is only
+    // ever a press, never a hold: on the Feather this is also the BOOT pin.
+    if (hal::wasPressed(hal::Button::Sleep)) {
         enterSleep();
         return;
     }
@@ -305,9 +314,9 @@ void loop() {
         return;
     }
 
-    // Btn A walks the current stop's remaining pages before moving on. Read on
-    // release, so a hold is only ever the sleep gesture.
-    if (M5.BtnA.wasClicked()) {
+    // The primary button walks the current stop's remaining pages before
+    // moving on. Read on release, so a hold is only ever the sleep gesture.
+    if (hal::wasClicked(hal::Button::Primary)) {
         size_t totalPages =
             servicePageCount(cachedServices.size(), servicesPerScreen());
         if (currentPage + 1 < totalPages) {
