@@ -1,0 +1,47 @@
+name: firmware
+
+# The point of supporting two boards from one tree is that neither can rot
+# unnoticed, which only holds if both are built on every change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware.yml'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - '.github/workflows/firmware.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # The toolchain and the board packages are by far the slowest part of
+      # this job, and they only change when platformio.ini does.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            firmware/.pio
+          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Host unit tests
+        working-directory: firmware
+        run: pio test -e native
+
+      # No -e: this builds every env in default_envs, i.e. both boards.
+      - name: Build all boards
+        working-directory: firmware
+        run: pio run
