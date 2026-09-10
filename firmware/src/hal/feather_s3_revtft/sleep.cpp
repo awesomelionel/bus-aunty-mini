@@ -20,9 +20,11 @@ constexpr uint32_t kPreSleepReleaseWaitMs = 5000;
 // it. Bounded either way so a stuck button cannot hang the device.
 constexpr uint32_t kWakeReleaseWaitMs = 1000;
 
+// Every physical button, once each: Sleep shares the middle one with
+// Secondary, so naming those three covers the board.
 bool anyButtonPressed() {
-    return isPressed(Button::Primary) || isPressed(Button::Secondary) ||
-           isPressed(Button::Sleep);
+    return isPressed(Button::Primary) || isPressed(Button::Previous) ||
+           isPressed(Button::Secondary);
 }
 
 void waitForButtonRelease(uint32_t timeoutMs) {

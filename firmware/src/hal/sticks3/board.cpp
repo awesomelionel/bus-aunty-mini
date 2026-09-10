@@ -13,12 +13,8 @@ constexpr BoardProfile kProfile = {
     /*rotation=*/1,
     /*brightnessFull=*/128,
     /*brightnessDim=*/16,
-    /*primaryButtonLabel=*/"Btn A",
+    // Named on the side of the case, where it can be read while holding it.
     /*secondaryButtonLabel=*/"Btn B",
-    // Both buttons are named on the front and side of the case, where you can
-    // read them while holding it.
-    /*secondaryButtonHint=*/ButtonHint::Name,
-    /*hasSleepButton=*/false,
     // The PMIC reports a negative level with no battery attached, so an
     // absent battery is distinguishable from a full one.
     /*detectsBatteryPresence=*/true,

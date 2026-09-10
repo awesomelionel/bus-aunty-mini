@@ -25,25 +25,37 @@ the same screens. A USB-C cable is needed for flashing and power; the battery
 is optional on both, though only the StickS3 can tell that it is missing (see
 [Sleep mode](#sleep-mode)).
 
-Buttons, by role rather than by name:
+The two boards have different numbers of buttons, so they get different
+layouts. The Feather's three sit in a column beside the screen and are used as
+up / middle / down:
 
-| Role | StickS3 | Feather | Action |
-| --- | --- | --- | --- |
-| Primary | KEY1, front | D1 | Press to page through the current stop's services, then move to the next stop. Hold 1.5s to sleep now |
-| Secondary | KEY2, side | D0 | Hold 3s to reopen the setup portal and edit stops or WiFi |
-| Sleep | — | D2 | Press to sleep now |
-| Any button | | | Press to wake from sleep |
+| Feather | Gesture | Action |
+| --- | --- | --- |
+| D2, top | press | Forward: next page of services, then on to the next stop |
+| D0, bottom | press | Back the same way: previous page, then the previous stop |
+| D1, middle | press | Sleep now |
+| D1, middle | hold 3s | Reopen the setup portal to edit stops or WiFi |
+| any | press | Wake from sleep |
 
-The Feather's D0/D1/D2 silkscreen is on the *back* of the board, so a user
-looking at the screen cannot tell the buttons apart. The portal gesture is
-therefore on D0 and the no-stops screen prompts with a downward arrow pointing
-at the bottom edge rather than naming the button. Which of the two styles a
-board uses is `secondaryButtonHint` on its `BoardProfile`.
+The StickS3 has only two buttons, so it keeps the original single-direction
+layout:
 
-D0 is also the BOOT pin, and it carries a hold gesture anyway: the ROM
-bootloader is only entered by holding D0 *across a reset*, so a three-second
-hold during normal operation is safe. A device that happens to reset mid-hold
-comes up in bootloader mode, which a power cycle undoes.
+| StickS3 | Gesture | Action |
+| --- | --- | --- |
+| KEY1, front | press | Forward: next page of services, then on to the next stop |
+| KEY1, front | hold 1.5s | Sleep now |
+| KEY2, side | hold 3s | Reopen the setup portal to edit stops or WiFi |
+| either | press | Wake from sleep |
+
+Both wrap around, so a short list of stops is a loop rather than a dead end,
+and landing on a new stop always starts at its first page.
+
+Two details specific to the Feather. Its D0/D1/D2 silkscreen is on the *back*
+of the board, so "hold D1" would tell a user looking at the screen nothing —
+the portal is on the middle button precisely because that one can be described
+by position, and the no-stops screen asks for "the middle btn". And D0 is also
+the BOOT pin, which is harmless here: the ROM bootloader is only entered by
+holding D0 *across a reset*, and D0 carries no hold gesture anyway.
 
 ## Prerequisites
 
@@ -129,8 +141,8 @@ each with:
 The same page carries the **"Always on (skip dimming and sleep)"** checkbox,
 for devices that live permanently on USB — see [Sleep mode](#sleep-mode).
 
-To change any of this after setup, hold the secondary button — KEY2 on the
-StickS3, D0 (the bottom one) on the Feather — for 3 seconds. The portal reopens
+To change any of this after setup, hold the portal button — KEY2 on the
+StickS3, D1 (the middle one) on the Feather — for 3 seconds. The portal reopens
 with your current settings pre-filled, and saving writes them back to NVS only
 if they actually changed. With no stops configured, the screen prompts you to
 do exactly this.
@@ -159,12 +171,12 @@ it. Two idle stages, both counted from the last button press:
 | 30s | The backlight dims. The screen stays live and polling carries on |
 | 2 min | `Sleeping...`, then the screen and the WiFi radio go off |
 
-Holding the primary button for 1.5 seconds sleeps immediately, without waiting
-out the timeout; on the Feather, a single press of D2 does the same. Pressing
-any button wakes the device: it restores the screen, reconnects, and fetches
-the current stop straight away rather than showing the arrival times it had
-before it went down, which by then are minutes stale. The press that wakes it
-does nothing else — it will not also page or change stop.
+Either board can be sent to sleep immediately rather than waiting out the
+timeout: press the Feather's middle button, or hold the StickS3's KEY1 for 1.5
+seconds. Pressing any button wakes the device: it restores the screen,
+reconnects, and fetches the current stop straight away rather than showing the
+arrival times it had before it went down, which by then are minutes stale. The
+press that wakes it does nothing else — it will not also page or change stop.
 
 The device sleeps by light-sleeping the SoC with every button armed as a wake
 source, rather than deep-sleeping it. RAM survives, so the configured stops

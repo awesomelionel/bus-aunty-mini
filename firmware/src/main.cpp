@@ -165,6 +165,38 @@ void pollAndRender() {
 
 void noteInteraction() { lastInteractionMillis = millis(); }
 
+// Stepping walks the current stop's pages before moving on to the adjacent
+// stop, in whichever direction, so a stop with more services than fit is
+// fully reachable without a gesture of its own. Both wrap, so a short list
+// stays a loop rather than a dead end.
+//
+// Landing on a new stop always starts at its first page: how many pages it
+// has is not known until it has been fetched.
+void stepForward() {
+    size_t totalPages =
+        servicePageCount(cachedServices.size(), servicesPerScreen());
+    if (currentPage + 1 < totalPages) {
+        ++currentPage;
+        renderCachedPage();
+        return;
+    }
+    currentPage = 0;
+    currentStopIndex = (currentStopIndex + 1) % busStops.size();
+    needsImmediateFetch = true;
+}
+
+void stepBack() {
+    if (currentPage > 0) {
+        --currentPage;
+        renderCachedPage();
+        return;
+    }
+    currentPage = 0;
+    currentStopIndex =
+        (currentStopIndex + busStops.size() - 1) % busStops.size();
+    needsImmediateFetch = true;
+}
+
 // Blanks the screen, drops the radio, and blocks until a button is pressed.
 void enterSleep() {
     // Back to full brightness first: on the idle path the screen is already
@@ -288,6 +320,7 @@ void loop() {
     // the backlight straight back up so the screen responds before the button
     // is even released.
     if (hal::wasPressed(hal::Button::Primary) ||
+        hal::wasPressed(hal::Button::Previous) ||
         hal::wasPressed(hal::Button::Secondary) ||
         hal::wasPressed(hal::Button::Sleep)) {
         noteInteraction();
@@ -302,16 +335,18 @@ void loop() {
         return;
     }
 
-    // Held rather than clicked, so putting the device away deliberately does
-    // not collide with paging through stops.
-    if (hal::wasHold(hal::Button::Primary)) {
+    // Clicked rather than pressed: the sleep button may share a physical
+    // button with the portal's, and firing on the press would sleep the
+    // device the moment someone started holding it for the portal.
+    if (hal::wasClicked(hal::Button::Sleep)) {
         enterSleep();
         return;
     }
 
-    // Boards with a button to spare sleep on a single press of it. It is only
-    // ever a press, never a hold: on the Feather this is also the BOOT pin.
-    if (hal::wasPressed(hal::Button::Sleep)) {
+    // Boards with no button to spare for sleeping hold the primary one
+    // instead, which is why it is a hold: it must not collide with paging.
+    if (!hal::hasButton(hal::Button::Sleep) &&
+        hal::wasHold(hal::Button::Primary)) {
         enterSleep();
         return;
     }
@@ -329,19 +364,12 @@ void loop() {
         return;
     }
 
-    // The primary button walks the current stop's remaining pages before
-    // moving on. Read on release, so a hold is only ever the sleep gesture.
+    // Read on release, so a hold is never also a step.
     if (hal::wasClicked(hal::Button::Primary)) {
-        size_t totalPages =
-            servicePageCount(cachedServices.size(), servicesPerScreen());
-        if (currentPage + 1 < totalPages) {
-            ++currentPage;
-            renderCachedPage();
-        } else {
-            currentPage = 0;
-            currentStopIndex = (currentStopIndex + 1) % busStops.size();
-            needsImmediateFetch = true;
-        }
+        stepForward();
+    }
+    if (hal::wasClicked(hal::Button::Previous)) {
+        stepBack();
     }
 
     if (WiFi.status() != WL_CONNECTED) {

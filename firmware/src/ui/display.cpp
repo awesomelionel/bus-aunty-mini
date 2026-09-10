@@ -70,32 +70,6 @@ void drawPageDots(size_t currentPage, size_t totalPages) {
     }
 }
 
-// Stands in for a button's name on boards where the silkscreen is not
-// readable in use. Sized to sit inside a text line without dominating it.
-constexpr int kArrowWidth = 11;
-constexpr int kArrowHeight = 7;
-
-void drawDownArrow(int centerX, int lineTopY, int lineHeight) {
-    const int top = lineTopY + (lineHeight - kArrowHeight) / 2;
-    canvas.fillTriangle(centerX - kArrowWidth / 2, top,
-                        centerX + kArrowWidth / 2, top, centerX,
-                        top + kArrowHeight, TFT_WHITE);
-}
-
-// Draws `before` + a down arrow + `after` as one centred line, since the
-// arrow has to sit inline where the button's name would otherwise be.
-void drawDownArrowLine(const char* before, const char* after, int y,
-                       int lineHeight) {
-    const int beforeWidth = canvas.textWidth(before);
-    const int afterWidth = canvas.textWidth(after);
-    int x = (screenWidth() - (beforeWidth + kArrowWidth + afterWidth)) / 2;
-
-    canvas.setTextDatum(top_left);
-    canvas.drawString(before, x, y);
-    drawDownArrow(x + beforeWidth + kArrowWidth / 2, y, lineHeight);
-    canvas.drawString(after, x + beforeWidth + kArrowWidth, y);
-}
-
 constexpr int kBatteryBodyWidth = 20;
 constexpr int kBatteryHeight = 11;
 constexpr int kBatteryTipWidth = 2;
@@ -247,29 +221,20 @@ void displayShowNoStops(const std::string& ssid) {
     canvas.fillSprite(TFT_BLACK);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
-    constexpr int kLineCount = 4;
-    const int lineHeight = canvas.fontHeight();
-    const int firstLineY = (screenHeight() - lineHeight * kLineCount) / 2;
-    const auto lineY = [&](int index) {
-        return firstLineY + index * lineHeight;
-    };
-
     canvas.setTextDatum(top_center);
-    canvas.drawString("No bus stops yet", screenWidth() / 2, lineY(0));
 
-    // The second line is the one that has to identify a button, either by the
-    // name on the case or by pointing at it.
-    if (board().secondaryButtonHint == ButtonHint::ArrowDown) {
-        drawDownArrowLine("Hold ", ", then", lineY(1), lineHeight);
-        canvas.setTextDatum(top_center);
-    } else {
-        const std::string holdLine =
-            std::string("Hold ") + board().secondaryButtonLabel + ", then";
-        canvas.drawString(holdLine.c_str(), screenWidth() / 2, lineY(1));
+    int lineHeight = canvas.fontHeight();
+    const std::string holdLine =
+        std::string("Hold ") + board().secondaryButtonLabel + ", then";
+    const std::string lines[] = {"No bus stops yet", holdLine, "join WiFi:",
+                                 ssid};
+    int count = static_cast<int>(sizeof(lines) / sizeof(lines[0]));
+    int firstLineY = (screenHeight() - lineHeight * count) / 2;
+
+    for (int i = 0; i < count; ++i) {
+        canvas.drawString(lines[i].c_str(), screenWidth() / 2,
+                          firstLineY + i * lineHeight);
     }
-
-    canvas.drawString("join WiFi:", screenWidth() / 2, lineY(2));
-    canvas.drawString(ssid.c_str(), screenWidth() / 2, lineY(3));
 
     canvas.pushSprite(0, 0);
 }

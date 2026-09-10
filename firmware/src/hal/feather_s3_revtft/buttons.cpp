@@ -9,18 +9,25 @@
 namespace hal {
 namespace {
 
-ButtonGesture primaryGesture;
-ButtonGesture secondaryGesture;
-ButtonGesture sleepGesture;
+ButtonGesture gestures[feather::kFeatherButtonCount];
 
+// Up and down step through the arrivals, and the middle button carries both
+// of the remaining roles: a click sleeps, a long hold reopens the portal.
+// The two never collide, because a gesture reports a click only when the
+// hold did not fire.
+//
+// The middle button is the portal's, rather than an outer one, because it is
+// the only button that can be described to a user without them reading the
+// D0/D1/D2 silkscreen on the back of the board.
 ButtonGesture* gestureFor(Button button) {
     switch (button) {
         case Button::Primary:
-            return &primaryGesture;
+            return &gestures[feather::kUp];
+        case Button::Previous:
+            return &gestures[feather::kDown];
         case Button::Secondary:
-            return &secondaryGesture;
         case Button::Sleep:
-            return &sleepGesture;
+            return &gestures[feather::kCenter];
     }
     return nullptr;
 }
@@ -28,21 +35,19 @@ ButtonGesture* gestureFor(Button button) {
 }  // namespace
 
 void buttonsBegin() {
-    for (const feather::ButtonPin& button : feather::kButtonPins) {
-        pinMode(button.gpio, button.activeLow ? INPUT_PULLUP : INPUT_PULLDOWN);
+    for (const feather::ButtonPin& pin : feather::kButtonPins) {
+        pinMode(pin.gpio, pin.activeLow ? INPUT_PULLUP : INPUT_PULLDOWN);
     }
 }
 
 void buttonsUpdate() {
     const uint32_t now = millis();
-    for (const feather::ButtonPin& button : feather::kButtonPins) {
-        const bool high = digitalRead(button.gpio) == HIGH;
+    for (int i = 0; i < feather::kFeatherButtonCount; ++i) {
+        const feather::ButtonPin& pin = feather::kButtonPins[i];
+        const bool high = digitalRead(pin.gpio) == HIGH;
         // Polarity is normalised here so the shared gesture logic never
         // learns that this board's buttons disagree with each other.
-        const bool pressed = button.activeLow ? !high : high;
-        if (ButtonGesture* gesture = gestureFor(button.button)) {
-            gesture->update(pressed, now);
-        }
+        gestures[i].update(pin.activeLow ? !high : high, now);
     }
 }
 

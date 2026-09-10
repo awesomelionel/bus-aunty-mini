@@ -21,8 +21,12 @@ ButtonGesture* gestureFor(Button button) {
             return &primaryGesture;
         case Button::Secondary:
             return &secondaryGesture;
+        case Button::Previous:
         case Button::Sleep:
-            break;  // this board has only KEY1 and KEY2
+            // Only KEY1 and KEY2 here, so there is nothing to spare for
+            // going back or for a dedicated sleep button. Holding KEY1
+            // sleeps instead.
+            break;
     }
     return nullptr;
 }
