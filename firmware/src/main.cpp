@@ -35,9 +35,10 @@ constexpr uint32_t kSleepAfterMs = 120000;
 // deliberate rather than as a flat battery.
 constexpr uint32_t kSleepNoticeMs = 700;
 
-// Waiting on WiFi here rather than falling through to the loop's reconnect
-// branch, which would flash "WiFi lost" every time the device woke up.
-constexpr uint32_t kWakeReconnectTimeoutMs = 8000;
+// Cold start after light sleep needs a scan + associate + DHCP, so this is
+// longer than a typical boot reconnect. Falling through early would flash
+// "WiFi lost" on every wake even when the AP is fine.
+constexpr uint32_t kWakeReconnectTimeoutMs = 20000;
 
 std::vector<BusStopConfig> busStops;
 // Set in the portal for deployments that are permanently plugged in, where
@@ -206,14 +207,22 @@ void enterSleep() {
     delay(kSleepNoticeMs);
     displaySleep();
 
-    // The radio is the largest draw by far, and WiFiManager left the
-    // credentials in NVS, so dropping it costs only the reconnect below.
-    WiFi.disconnect(/*wifioff=*/true, /*eraseap=*/false);
+    // ESP-IDF requires the WiFi driver to be stopped before light sleep: the
+    // radio is powered down either way, and leaving the driver "started"
+    // means the post-wake mode(WIFI_STA) is a no-op and reconnect never
+    // recovers. Disconnect alone is not enough -- if it fails, the radio
+    // would stay up -- so WIFI_OFF is forced afterwards. Credentials stay
+    // in NVS; WiFi.begin() below reloads them.
+    WiFi.disconnect(/*wifioff=*/false, /*eraseap=*/false);
+    WiFi.mode(WIFI_OFF);
 
     hal::sleepUntilButtonPress();
 
     displayWake();
     displayShowStatus("Waking up...");
+
+    // Full bring-up rather than reconnect(): after WIFI_OFF the station
+    // interface has to be created again before esp_wifi_connect can work.
     WiFi.mode(WIFI_STA);
     WiFi.begin();
     uint32_t startedAt = millis();
@@ -221,6 +230,10 @@ void enterSleep() {
            millis() - startedAt < kWakeReconnectTimeoutMs) {
         delay(100);
     }
+    Serial.printf("[wifi] wake reconnect %s after %lums (status %d)\n",
+                  WiFi.status() == WL_CONNECTED ? "ok" : "failed",
+                  static_cast<unsigned long>(millis() - startedAt),
+                  static_cast<int>(WiFi.status()));
 
     // However long the device was away, the cached arrivals have expired, and
     // the screen was cleared before sleeping, so everything is redrawn.
@@ -374,7 +387,13 @@ void loop() {
 
     if (WiFi.status() != WL_CONNECTED) {
         displayShowStatus("WiFi lost, reconnecting...");
-        WiFi.reconnect();
+        // reconnect() only works when the station interface is still up;
+        // after a failed wake bring-up it isn't, so fall back to a full
+        // begin() with the credentials still in NVS.
+        if (!WiFi.reconnect()) {
+            WiFi.mode(WIFI_STA);
+            WiFi.begin();
+        }
         delay(1000);
         return;
     }
