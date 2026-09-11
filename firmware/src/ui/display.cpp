@@ -1,6 +1,7 @@
 // firmware/src/ui/display.cpp
 #include "ui/display.h"
 
+#include <cstdio>
 #include <vector>
 
 #include "board/board.h"
@@ -180,7 +181,8 @@ void displayShowStatus(const std::string& message) {
     canvas.pushSprite(0, 0);
 }
 
-void displayShowWifiSetup(const std::string& ssid) {
+void displayShowWifiSetup(const std::string& ssid,
+                          const std::string& password) {
     canvas.fillSprite(TFT_BLACK);
     // 18px here rather than the shared 16px default. Font 2 is a bitmap font,
     // so scaling it to 18 would resample unevenly; DejaVu18 is natively 18px.
@@ -190,7 +192,7 @@ void displayShowWifiSetup(const std::string& ssid) {
 
     int lineHeight = canvas.fontHeight();
     int iconHeight = static_cast<int>(kWifiIconInkHeight * kWifiIconScale + 0.5f);
-    int blockHeight = iconHeight + kWifiIconTextGap + lineHeight * 2;
+    int blockHeight = iconHeight + kWifiIconTextGap + lineHeight * 3;
     int iconY = (screenHeight() - blockHeight) / 2;
 
     // Shrinking the arcs this far needs antialiasing, which only works from a
@@ -212,12 +214,45 @@ void displayShowWifiSetup(const std::string& ssid) {
     int textY = iconY + iconHeight + kWifiIconTextGap;
     canvas.drawString("Connect WiFi to:", screenWidth() / 2, textY);
     canvas.drawString(ssid.c_str(), screenWidth() / 2, textY + lineHeight);
+    canvas.drawString(password.c_str(), screenWidth() / 2,
+                      textY + lineHeight * 2);
 
     canvas.pushSprite(0, 0);
     canvas.setTextFont(kDefaultTextFont);
 }
 
-void displayShowNoStops(const std::string& ssid) {
+void displayShowConfig(const std::string& url, const std::string& ip,
+                       uint32_t remainingMs) {
+    canvas.fillSprite(TFT_BLACK);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextDatum(top_center);
+
+    char remain[24];
+    std::snprintf(remain, sizeof(remain), "unlocked %us",
+                  static_cast<unsigned>((remainingMs + 999) / 1000));
+    const std::string lines[] = {url, ip, remain, "press again for AP"};
+    int lineHeight = canvas.fontHeight();
+    int count = static_cast<int>(sizeof(lines) / sizeof(lines[0]));
+    int firstLineY = (screenHeight() - lineHeight * count) / 2;
+    for (int i = 0; i < count; ++i) {
+        canvas.drawString(lines[i].c_str(), screenWidth() / 2,
+                          firstLineY + i * lineHeight);
+    }
+    canvas.pushSprite(0, 0);
+}
+
+void displayShowWifiOffline() {
+    canvas.fillSprite(TFT_BLACK);
+    canvas.setTextColor(TFT_WHITE, TFT_BLACK);
+    canvas.setTextDatum(middle_center);
+    canvas.drawString("No WiFi", screenWidth() / 2, screenHeight() / 2 - 10);
+    canvas.setTextDatum(top_center);
+    canvas.drawString("press to retry", screenWidth() / 2,
+                      screenHeight() / 2 + 8);
+    canvas.pushSprite(0, 0);
+}
+
+void displayShowNoStops() {
     canvas.fillSprite(TFT_BLACK);
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
@@ -226,8 +261,8 @@ void displayShowNoStops(const std::string& ssid) {
     int lineHeight = canvas.fontHeight();
     const std::string holdLine =
         std::string("Hold ") + board().secondaryButtonLabel + ", then";
-    const std::string lines[] = {"No bus stops yet", holdLine, "join WiFi:",
-                                 ssid};
+    const std::string lines[] = {"No bus stops yet", holdLine,
+                                 "open busaunty.local"};
     int count = static_cast<int>(sizeof(lines) / sizeof(lines[0]));
     int firstLineY = (screenHeight() - lineHeight * count) / 2;
 

@@ -3,8 +3,8 @@
 ESP32-S3 firmware that polls
 `GET https://api.busaunty.com/api/v1/BusArrival?BusStopCode=<code>` every 30
 seconds and shows up to 6 bus services, with all 3 arrival times each, for up
-to 4 configured bus stops. Bus stops and WiFi credentials are both set on the
-device through a captive portal — nothing is compiled in.
+to 4 configured bus stops. Bus stops and WiFi credentials are both set on a
+page the device serves at `http://busaunty.local` — nothing is compiled in.
 
 ## Supported boards
 
@@ -34,7 +34,7 @@ up / middle / down:
 | D2, top | press | Forward: next page of services, then on to the next stop |
 | D0, bottom | press | Back the same way: previous page, then the previous stop |
 | D1, middle | press | Sleep now |
-| D1, middle | hold 3s | Reopen the setup portal to edit stops or WiFi |
+| D1, middle | hold 3s | Unlock the config page at `busaunty.local` |
 | any | press | Wake from sleep |
 
 The StickS3 has only two buttons, so it keeps the original single-direction
@@ -44,7 +44,7 @@ layout:
 | --- | --- | --- |
 | KEY1, front | press | Forward: next page of services, then on to the next stop |
 | KEY1, front | hold 1.5s | Sleep now |
-| KEY2, side | hold 3s | Reopen the setup portal to edit stops or WiFi |
+| KEY2, side | hold 3s | Unlock the config page at `busaunty.local` |
 | either | press | Wake from sleep |
 
 Both wrap around, so a short list of stops is a loop rather than a dead end,
@@ -52,7 +52,7 @@ and landing on a new stop always starts at its first page.
 
 Two details specific to the Feather. Its D0/D1/D2 silkscreen is on the *back*
 of the board, so "hold D1" would tell a user looking at the screen nothing —
-the portal is on the middle button precisely because that one can be described
+the config hold is on the middle button precisely because that one can be described
 by position, and the no-stops screen asks for "the middle btn". And D0 is also
 the BOOT pin, which is harmless here: the ROM bootloader is only entered by
 holding D0 *across a reset*, and D0 carries no hold gesture anyway.
@@ -94,8 +94,9 @@ the `uf2` partition so double-tap flashing still works.
 ## Run the unit tests
 
 The pure logic in `src/core/` (ISO-8601 parsing, ETA formatting, JSON parsing,
-bus stop config validation, the sleep/dim decision, the screen layout, the
-button click/hold gestures) runs as host-native unit tests — no device needed:
+bus stop config validation, WiFi credential and connection policy, HTML
+escaping, the sleep/dim decision, the screen layout, the button click/hold
+gestures) runs as host-native unit tests — no device needed:
 
 ```bash
 cd firmware
@@ -114,38 +115,57 @@ break unnoticed.
 ## First-time setup
 
 1. Flash the firmware and power on the device.
-2. It opens an open WiFi access point named `BusAuntySetup`.
-3. Connect to it from your phone or laptop; a captive-portal page should open
+2. With no saved networks it opens a WPA2 access point named `BusAuntySetup`.
+   The password is eight hex digits shown on the screen (derived from the
+   chip's MAC, so it is different on every device).
+3. Join that AP from your phone or laptop. A captive-portal page should open
    automatically (or browse to `192.168.4.1`).
-4. Choose "Configure WiFi", pick your network, and enter its password.
-5. Open the "Setup" page and fill in your bus stops (see below), then save.
-6. The device syncs its clock over NTP and starts polling.
+4. Add your first WiFi network — pick it from the scan list if you can, so
+   names with curly apostrophes (iPhone hotspots) do not have to be typed.
+5. Fill in your bus stops on the same page, then save.
+6. The device leaves the AP, joins the network you added, syncs its clock
+   over NTP, and starts polling.
 
-The portal times out after 180 seconds. On a first boot with no saved
-credentials, a timeout makes the device restart and try again. WiFi credentials
-and bus stops are stored on-device (WiFiManager's own storage and the
-`busaunty` NVS namespace respectively), never in source, and are reused on
-every future boot.
+You can save up to five networks. The order of the list is the priority:
+home first, office second, phone hotspot last, so the device will not sit
+on cellular data when a real network is in range. It scans, tries the
+highest-priority network it can see, and if nothing works it waits 5s, then
+15s, then 60s between retries. A button press retries immediately — that is
+how you catch a hotspot you just switched on.
 
-## Configuring bus stops
+A device that already had WiFi saved by the old firmware keeps that network
+as #1 on first boot, so flashing this build does not send you back through
+setup.
 
-Bus stops live on the portal's own "Setup" page — separate from the WiFi page
-so editing a stop doesn't mean retyping your WiFi password. There are 4 slots,
-each with:
+## Configuring the device
+
+After it is on your LAN, hold the config button — KEY2 on the StickS3, D1
+(the middle one) on the Feather — for 3 seconds. That unlocks
+`http://busaunty.local` for five minutes (the IP is also shown on screen).
+Outside that window the page asks you to press the button; saved passwords
+are never sent to the browser. Press the same button again from that screen
+to raise the setup AP if you cannot reach the device on the LAN.
+
+The same page holds WiFi networks, four bus-stop slots, and the always-on
+checkbox:
 
 - **Code** (required): 3-5 digits, leading zeros preserved (`00481` stays
   `00481`). Rows with a missing or invalid code are dropped.
 - **Name** (optional, up to 16 characters): shown in the header instead of the
   code. A name with no code is ignored.
 
-The same page carries the **"Always on (skip dimming and sleep)"** checkbox,
-for devices that live permanently on USB — see [Sleep mode](#sleep-mode).
+With no stops configured, the screen prompts you to hold the config button
+and open `busaunty.local`.
 
-To change any of this after setup, hold the portal button — KEY2 on the
-StickS3, D1 (the middle one) on the Feather — for 3 seconds. The portal reopens
-with your current settings pre-filled, and saving writes them back to NVS only
-if they actually changed. With no stops configured, the screen prompts you to
-do exactly this.
+## Phone hotspot
+
+The ESP32-S3 radio is 2.4 GHz only. Recent iPhones default Personal Hotspot
+to 5 GHz, and the device will never see it. Turn on **Maximize Compatibility**
+in the hotspot settings to force 2.4 GHz.
+
+iOS also sleeps the hotspot radio unless the Personal Hotspot screen is open
+or a client is already attached. Switch the hotspot on, then press a button
+on the device so it scans immediately rather than waiting out a backoff.
 
 ## What's on screen
 
@@ -156,7 +176,7 @@ rendered as minutes from now — `Due` for anything at or before now, `Nm` up to
 an hour, `60+` beyond that, and `--` when the API gave no time for that slot.
 
 Everything else is a full-screen status message: connecting to WiFi, syncing
-time, loading a stop, WiFi lost and reconnecting, going to sleep and waking up,
+time, loading a stop, no WiFi (press to retry), going to sleep and waking up,
 or an error (`No data for X` for an HTTP 404, `Fetch failed (<status>)`
 otherwise, `Bad response for X` for unparseable JSON, `X: no services` when the
 stop has none).
@@ -198,7 +218,7 @@ tell differs, and neither can tell perfectly:
   indistinguishable.
 
 For anything permanently plugged in, tick **"Always on (skip dimming and
-sleep)"** on the portal's Setup page. That is a deployment decision rather than
+sleep)"** on the config page. That is a deployment decision rather than
 something the hardware can sense, so it is a saved setting: it disables both
 idle stages outright, on either board.
 

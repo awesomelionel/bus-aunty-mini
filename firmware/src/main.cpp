@@ -10,13 +10,16 @@
 #include "core/arrival_parser.h"
 #include "core/bus_stop_config.h"
 #include "core/sleep_policy.h"
+#include "core/wifi_credentials.h"
 #include "hal/buttons.h"
 #include "hal/power.h"
 #include "hal/sleep.h"
 #include "net/bus_api_client.h"
-#include "net/wifi_portal.h"
+#include "net/config_server.h"
+#include "net/wifi_link.h"
 #include "storage/bus_stop_store.h"
 #include "storage/device_settings.h"
+#include "storage/wifi_store.h"
 #include "ui/display.h"
 
 namespace {
@@ -26,43 +29,35 @@ constexpr uint32_t kPortalHoldMs = 3000;
 constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
 
-// Long enough to read the screen and page through a couple of stops without it
-// dimming under you, short enough that a device left face-up on a table is not
-// still lit and polling a minute later.
 constexpr uint32_t kDimAfterMs = 30000;
 constexpr uint32_t kSleepAfterMs = 120000;
-// How long "Sleeping..." stays up, so the screen going black reads as
-// deliberate rather than as a flat battery.
 constexpr uint32_t kSleepNoticeMs = 700;
-
-// Cold start after light sleep needs a scan + associate + DHCP, so this is
-// longer than a typical boot reconnect. Falling through early would flash
-// "WiFi lost" on every wake even when the AP is fine.
-constexpr uint32_t kWakeReconnectTimeoutMs = 20000;
+constexpr uint32_t kPortalNoticeMs = 900;
 
 std::vector<BusStopConfig> busStops;
-// Set in the portal for deployments that are permanently plugged in, where
-// dimming and sleeping are a nuisance rather than a saving.
+std::vector<WifiNetwork> wifiNetworks;
 bool alwaysOn = false;
+bool networksDirty = false;
+bool stopsDirty = false;
+bool alwaysOnDirty = false;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
 bool noStopsRendered = false;
+bool offlineRendered = false;
+bool inConfigScreen = false;
+bool timeSynced = false;
+WifiLinkState lastLinkState = WifiLinkState::Backoff;
 
 uint32_t lastInteractionMillis = 0;
 PowerMode powerMode = PowerMode::Awake;
 
-// The last fetch is kept so paging through a long service list re-renders
-// locally instead of hitting the API again on every button press.
 std::vector<BusService> cachedServices;
 std::string cachedLabel;
 size_t currentPage = 0;
 
-void onPortalStarted() { displayShowWifiSetup(kSetupApSsid); }
+void noteInteraction() { lastInteractionMillis = millis(); }
 
-// Diagnostic: the screen only ever shows a binary connected/not-connected, so
-// these are the only way to tell a rejected password from an AP the radio
-// never saw, or from a reboot that restarts setup() before the portal opens.
 void logWifiDiagnostics() {
     Serial.printf("[boot] reset reason %d, free heap %u\n",
                   static_cast<int>(esp_reset_reason()), ESP.getFreeHeap());
@@ -91,18 +86,32 @@ void logWifiDiagnostics() {
         ARDUINO_EVENT_WIFI_STA_GOT_IP);
 }
 
-// Comparing the serialized form keeps NVS untouched when a portal visit left
-// the stops alone, which is the common case on every boot.
-void persistStopsIfChanged(const std::string& before) {
-    if (serializeBusStops(busStops) != before) {
+void persistDirtySettings() {
+    if (stopsDirty) {
         saveBusStops(busStops);
+        stopsDirty = false;
+    }
+    if (alwaysOnDirty) {
+        saveAlwaysOn(alwaysOn);
+        alwaysOnDirty = false;
+    }
+    if (networksDirty) {
+        saveWifiNetworks(wifiNetworks);
+        networksDirty = false;
     }
 }
 
-void persistAlwaysOnIfChanged(bool before) {
-    if (alwaysOn != before) {
-        saveAlwaysOn(alwaysOn);
-    }
+void startSetupAp() {
+    uint8_t mac[6] = {};
+    WiFi.mode(WIFI_STA);
+    WiFi.macAddress(mac);
+    std::string password = deriveApPassword(mac);
+    wifiLinkStartAp(kSetupApSsid, password.c_str());
+    configServerUnlock(millis());
+    configServerStartCaptiveDns();
+    displayShowWifiSetup(kSetupApSsid, password);
+    inConfigScreen = false;
+    offlineRendered = false;
 }
 
 void syncTime() {
@@ -115,6 +124,7 @@ void syncTime() {
         delay(250);
         now = time(nullptr);
     }
+    timeSynced = now >= 1700000000;
 }
 
 void renderCachedPage() {
@@ -132,11 +142,10 @@ void pollAndRender() {
     const std::string& label = busStopLabel(stop);
     displayShowStatus("Loading " + label + "...");
 
-    // Drop the previous stop's services so Btn A cannot page through stale
-    // data if this fetch fails.
     cachedServices.clear();
-
+    wifiLinkSetBusy(true);
     FetchResult fetch = fetchBusArrival(stop.code);
+    wifiLinkSetBusy(false);
     if (!fetch.ok) {
         displayShowStatus(fetch.httpStatus == 404
                                ? "No data for " + label
@@ -164,15 +173,6 @@ void pollAndRender() {
     renderCachedPage();
 }
 
-void noteInteraction() { lastInteractionMillis = millis(); }
-
-// Stepping walks the current stop's pages before moving on to the adjacent
-// stop, in whichever direction, so a stop with more services than fit is
-// fully reachable without a gesture of its own. Both wrap, so a short list
-// stays a loop rather than a dead end.
-//
-// Landing on a new stop always starts at its first page: how many pages it
-// has is not known until it has been fetched.
 void stepForward() {
     size_t totalPages =
         servicePageCount(cachedServices.size(), servicesPerScreen());
@@ -198,56 +198,34 @@ void stepBack() {
     needsImmediateFetch = true;
 }
 
-// Blanks the screen, drops the radio, and blocks until a button is pressed.
 void enterSleep() {
-    // Back to full brightness first: on the idle path the screen is already
-    // dimmed, and the notice is the one thing here that has to be read.
     displaySetDimmed(false);
     displayShowStatus("Sleeping...");
     delay(kSleepNoticeMs);
     displaySleep();
 
-    // ESP-IDF requires the WiFi driver to be stopped before light sleep: the
-    // radio is powered down either way, and leaving the driver "started"
-    // means the post-wake mode(WIFI_STA) is a no-op and reconnect never
-    // recovers. Disconnect alone is not enough -- if it fails, the radio
-    // would stay up -- so WIFI_OFF is forced afterwards. Credentials stay
-    // in NVS; WiFi.begin() below reloads them.
-    WiFi.disconnect(/*wifioff=*/false, /*eraseap=*/false);
-    WiFi.mode(WIFI_OFF);
+    configServerStopMdns();
+    configServerStopCaptiveDns();
+    wifiLinkPrepareSleep();
 
     hal::sleepUntilButtonPress();
 
     displayWake();
     displayShowStatus("Waking up...");
 
-    // Full bring-up rather than reconnect(): after WIFI_OFF the station
-    // interface has to be created again before esp_wifi_connect can work.
-    WiFi.mode(WIFI_STA);
-    WiFi.begin();
-    uint32_t startedAt = millis();
-    while (WiFi.status() != WL_CONNECTED &&
-           millis() - startedAt < kWakeReconnectTimeoutMs) {
-        delay(100);
-    }
-    Serial.printf("[wifi] wake reconnect %s after %lums (status %d)\n",
-                  WiFi.status() == WL_CONNECTED ? "ok" : "failed",
-                  static_cast<unsigned long>(millis() - startedAt),
-                  static_cast<int>(WiFi.status()));
+    wifiLinkOnWake();
 
-    // However long the device was away, the cached arrivals have expired, and
-    // the screen was cleared before sleeping, so everything is redrawn.
     cachedServices.clear();
     currentPage = 0;
     noStopsRendered = false;
+    offlineRendered = false;
+    inConfigScreen = false;
     needsImmediateFetch = true;
     lastPollMillis = millis();
     powerMode = PowerMode::Awake;
     noteInteraction();
 }
 
-// Returns true when the device slept, so the caller can drop the rest of the
-// iteration rather than act on button state read minutes ago.
 bool applyPowerMode() {
     SleepSettings settings;
     settings.enabled = !alwaysOn;
@@ -271,23 +249,53 @@ bool applyPowerMode() {
     return false;
 }
 
-// Reopens the captive portal so stops can be edited after the initial setup.
-void openConfigPortal() {
-    std::string beforeStops = serializeBusStops(busStops);
-    bool beforeAlwaysOn = alwaysOn;
-    wifiPortalReconfigure(kSetupApSsid, &busStops, &alwaysOn, onPortalStarted);
-    persistStopsIfChanged(beforeStops);
-    persistAlwaysOnIfChanged(beforeAlwaysOn);
+void showConfigScreen() {
+    uint32_t nowMs = millis();
+    std::string ip = wifiLinkIp();
+    displayShowConfig("busaunty.local", ip,
+                      configServerUnlockRemainingMs(nowMs));
+}
 
-    if (currentStopIndex >= busStops.size()) {
-        currentStopIndex = 0;
+void openConfigScreen() {
+    displayShowStatus("Unlocking...");
+    delay(kPortalNoticeMs);
+    configServerUnlock(millis());
+    if (wifiLinkConnected()) {
+        configServerStartMdns();
     }
-    cachedServices.clear();
-    currentPage = 0;
-    noStopsRendered = false;
-    needsImmediateFetch = true;
-    lastPollMillis = millis();
+    inConfigScreen = true;
+    offlineRendered = false;
+    showConfigScreen();
     noteInteraction();
+}
+
+void onLinkState(WifiLinkState next) {
+    if (next == lastLinkState) {
+        return;
+    }
+    if (next == WifiLinkState::Connected) {
+        configServerStopCaptiveDns();
+        configServerStartMdns();
+        if (!timeSynced) {
+            syncTime();
+        }
+        cachedServices.clear();
+        currentPage = 0;
+        noStopsRendered = false;
+        offlineRendered = false;
+        needsImmediateFetch = true;
+        lastPollMillis = millis();
+        noteInteraction();
+    } else if (lastLinkState == WifiLinkState::Connected) {
+        configServerStopMdns();
+        timeSynced = false;
+        cachedServices.clear();
+        offlineRendered = false;
+    }
+    if (next != WifiLinkState::ApFallback) {
+        configServerStopCaptiveDns();
+    }
+    lastLinkState = next;
 }
 
 }  // namespace
@@ -302,36 +310,48 @@ void setup() {
 
     busStops = loadBusStops();
     alwaysOn = loadAlwaysOn();
-    std::string savedStops = serializeBusStops(busStops);
-    bool savedAlwaysOn = alwaysOn;
+    wifiNetworks = loadWifiNetworks();
 
     logWifiDiagnostics();
 
-    displayShowStatus("Connecting WiFi...");
-    if (!wifiPortalConnect(kSetupApSsid, &busStops, &alwaysOn,
-                           onPortalStarted)) {
-        displayShowStatus("WiFi setup timed out.\nRestarting...");
-        delay(3000);
-        ESP.restart();
+    if (!wifiNetworksKeyExists()) {
+        WiFi.mode(WIFI_STA);
+        WifiNetwork imported;
+        if (wifiLinkImportStaCredentials(&imported)) {
+            wifiNetworks = {imported};
+            saveWifiNetworks(wifiNetworks);
+        }
     }
-    persistStopsIfChanged(savedStops);
-    persistAlwaysOnIfChanged(savedAlwaysOn);
 
-    syncTime();
-    // Start the idle clock once the device is actually usable: WiFi setup and
-    // the NTP sync can take longer than the dim delay on their own.
+    ConfigServerData config;
+    config.networks = &wifiNetworks;
+    config.stops = &busStops;
+    config.alwaysOn = &alwaysOn;
+    config.networksDirty = &networksDirty;
+    config.stopsDirty = &stopsDirty;
+    config.alwaysOnDirty = &alwaysOnDirty;
+    configServerBegin(config);
+
+    wifiLinkBegin(wifiNetworks);
+    lastLinkState = wifiLinkState();
+
+    if (wifiNetworks.empty()) {
+        startSetupAp();
+        lastLinkState = wifiLinkState();
+    } else {
+        displayShowStatus("Connecting WiFi...");
+    }
     noteInteraction();
 }
 
 void loop() {
     hal::buttonsUpdate();
-    // Sampled out here rather than at render time: the loop is idle between
-    // fetches, which is when the battery voltage reads true.
     hal::powerPoll();
+    wifiLinkTick(millis());
+    configServerTick();
+    persistDirtySettings();
+    onLinkState(wifiLinkState());
 
-    // Any press counts as use, whichever action it turns out to be, and takes
-    // the backlight straight back up so the screen responds before the button
-    // is even released.
     if (hal::wasPressed(hal::Button::Primary) ||
         hal::wasPressed(hal::Button::Previous) ||
         hal::wasPressed(hal::Button::Secondary) ||
@@ -341,23 +361,38 @@ void loop() {
             displaySetDimmed(false);
             powerMode = PowerMode::Awake;
         }
+        wifiLinkForceScan();
     }
 
-    if (hal::wasHold(hal::Button::Secondary)) {
-        openConfigPortal();
+    if (inConfigScreen) {
+        if (!configServerIsUnlocked(millis()) ||
+            hal::wasClicked(hal::Button::Primary)) {
+            inConfigScreen = false;
+            offlineRendered = false;
+            noStopsRendered = false;
+            needsImmediateFetch = wifiLinkConnected();
+            noteInteraction();
+            return;
+        }
+        if (hal::wasClicked(hal::Button::Secondary)) {
+            startSetupAp();
+            return;
+        }
+        showConfigScreen();
+        delay(50);
         return;
     }
 
-    // Clicked rather than pressed: the sleep button may share a physical
-    // button with the portal's, and firing on the press would sleep the
-    // device the moment someone started holding it for the portal.
+    if (hal::wasHold(hal::Button::Secondary)) {
+        openConfigScreen();
+        return;
+    }
+
     if (hal::wasClicked(hal::Button::Sleep)) {
         enterSleep();
         return;
     }
 
-    // Boards with no button to spare for sleeping hold the primary one
-    // instead, which is why it is a hold: it must not collide with paging.
     if (!hal::hasButton(hal::Button::Sleep) &&
         hal::wasHold(hal::Button::Primary)) {
         enterSleep();
@@ -368,34 +403,34 @@ void loop() {
         return;
     }
 
+    if (wifiLinkState() == WifiLinkState::ApFallback) {
+        delay(50);
+        return;
+    }
+
+    if (!wifiLinkConnected()) {
+        if (!offlineRendered && !inConfigScreen) {
+            displayShowWifiOffline();
+            offlineRendered = true;
+        }
+        delay(50);
+        return;
+    }
+
     if (busStops.empty()) {
         if (!noStopsRendered) {
-            displayShowNoStops(kSetupApSsid);
+            displayShowNoStops();
             noStopsRendered = true;
         }
         delay(50);
         return;
     }
 
-    // Read on release, so a hold is never also a step.
     if (hal::wasClicked(hal::Button::Primary)) {
         stepForward();
     }
     if (hal::wasClicked(hal::Button::Previous)) {
         stepBack();
-    }
-
-    if (WiFi.status() != WL_CONNECTED) {
-        displayShowStatus("WiFi lost, reconnecting...");
-        // reconnect() only works when the station interface is still up;
-        // after a failed wake bring-up it isn't, so fall back to a full
-        // begin() with the credentials still in NVS.
-        if (!WiFi.reconnect()) {
-            WiFi.mode(WIFI_STA);
-            WiFi.begin();
-        }
-        delay(1000);
-        return;
     }
 
     uint32_t now = millis();

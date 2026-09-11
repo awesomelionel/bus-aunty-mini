@@ -20,8 +20,11 @@ void displaySetDimmed(bool dimmed);
 void displaySleep();
 void displayWake();
 void displayShowStatus(const std::string& message);
-void displayShowWifiSetup(const std::string& ssid);
-void displayShowNoStops(const std::string& ssid);
+void displayShowWifiSetup(const std::string& ssid, const std::string& password);
+void displayShowConfig(const std::string& url, const std::string& ip,
+                       uint32_t remainingMs);
+void displayShowWifiOffline();
+void displayShowNoStops();
 // `stopLabel` is the stop's name, or its code when it was left unnamed.
 // `services` is already the slice for `currentPage`.
 void displayShowArrivals(const std::string& stopLabel,

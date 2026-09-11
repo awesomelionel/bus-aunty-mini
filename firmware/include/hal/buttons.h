@@ -16,7 +16,7 @@ namespace hal {
 enum class Button {
     Primary,    // advance: next page of services, then on to the next stop
     Previous,   // go back the same way. Absent on two-button boards
-    Secondary,  // held, it reopens the captive portal
+    Secondary,  // held, it unlocks the config page
     Sleep,      // clicked, it sleeps the device now
 };
 
