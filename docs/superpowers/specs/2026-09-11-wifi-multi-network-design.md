@@ -4,7 +4,7 @@
 
 **Architecture:** Five new modules replacing one. The decision-making (which network to try, in what order, how long to wait before retrying) becomes pure logic in `src/core/`, host-testable like `sleep_policy` and `button_gesture` already are. The radio, NVS and HTTP server sit behind thin wrappers in `src/net/` and `src/storage/` that hold no policy of their own.
 
-**Tech Stack:** No new libraries. `WebServer`, `DNSServer`, `ESPmDNS` and `esp_wifi` all ship with the ESP32 Arduino core; `tzapu/WiFiManager` is removed from `lib_deps` in both board envs. ArduinoJson v7 is reused for credential serialization, exactly as `bus_stop_config.cpp` uses it today.
+**Tech Stack:** No new libraries. `WebServer`, `DNSServer`, `ESPmDNS` and `esp_wifi` all ship with the ESP32 Arduino core; `tzapu/WiFiManager` is removed from `lib_deps` in both board envs. Credentials persist as a control-character-separated blob, the same encoding `bus_stop_config.cpp` already uses.
 
 **Validation status:** Nothing here has been compiled or flashed. The WiFiManager credential import (see *Migration*) depends on the ESP-IDF station config being populated from NVS at `esp_wifi_start()`, which is the documented behaviour when `nvs_enable` is set — Arduino sets it — but has not been confirmed on either board. Every item marked **verify on device** is genuinely unverified. Timing constants (scan duration, connect timeout, backoff steps) are estimates to be tuned against real hardware.
 
@@ -79,9 +79,13 @@ struct WifiNetwork {
 };
 ```
 
-The vector order is the priority; index 0 is tried first. Serialized as a JSON array into the existing `busaunty` NVS namespace under a `wifi` key, mirroring `bus_stop_store.cpp` including its habit of removing the key rather than storing an empty value, so "no networks configured" stays a single distinguishable state.
+The vector order is the priority; index 0 is tried first. Persisted into the existing `busaunty` NVS namespace under a `wifi` key using the same `\x1f` field / `\x1e` record encoding as `serializeBusStops`, including its habit of removing the key rather than storing an empty value, so "no networks configured" stays a single distinguishable state.
+
+One deliberate divergence from `bus_stop_config.cpp`. `normalizeBusStopName` *strips* characters that would break the encoding or the HTML. Credentials cannot work that way — a password must be stored byte-exact or it will not authenticate, and silently dropping a character from a password produces a network that fails to connect for no visible reason. So credential validation **rejects** an SSID or password containing `\x1e` or `\x1f` rather than sanitizing it. Neither is a printable character, so no real network is excluded.
 
 SSIDs are stored as raw UTF-8 bytes with no normalization. This is not incidental: an iPhone hotspot is named with a curly apostrophe (U+2019, as in `Lionel’s iPhone`), and any normalization, case-folding or ASCII coercion en route makes that network permanently unjoinable. The form is served with an explicit `charset=utf-8` for the same reason, and the scan-assisted picker (below) exists largely so the SSID never has to be typed at all.
+
+Because SSIDs cannot be sanitized, the config server must HTML-escape every value it renders into an attribute — `&`, `<`, `>`, `"` and `'`. The existing portal never did, which is exactly why `normalizeBusStopName` strips `'`, `<` and `>` today. That stripping stays as it is; relaxing it now that escaping exists is a separate change and out of scope.
 
 Passwords are stored in plaintext. This matches what ESP-IDF already does with the credentials on the device today; encrypting them would require flash encryption at the partition level, which is out of scope and carries a real bricking risk.
 
