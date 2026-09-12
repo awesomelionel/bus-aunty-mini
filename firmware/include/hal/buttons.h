@@ -36,4 +36,8 @@ bool wasHold(Button button);
 // those timings rather than the board.
 void setHoldThreshold(Button button, uint32_t holdThresholdMs);
 
+// After a wake, any button still down is the finger that woke us. Its
+// release must not also be a click or a hold.
+void buttonsSuppressHeldClicks();
+
 }  // namespace hal

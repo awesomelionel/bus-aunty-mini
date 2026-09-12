@@ -18,6 +18,15 @@ void ButtonGesture::setHoldThreshold(uint32_t holdThresholdMs) {
     holdThresholdMs_ = holdThresholdMs;
 }
 
+void ButtonGesture::suppressClickOnThisPress() {
+    if (pressed_) {
+        holdFired_ = true;
+    }
+    wasPressed_ = false;
+    wasClicked_ = false;
+    wasHold_ = false;
+}
+
 void ButtonGesture::update(bool physicallyPressed, uint32_t nowMs) {
     wasPressed_ = false;
     wasClicked_ = false;

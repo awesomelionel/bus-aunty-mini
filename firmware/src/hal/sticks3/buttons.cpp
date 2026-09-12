@@ -70,4 +70,9 @@ void setHoldThreshold(Button button, uint32_t holdThresholdMs) {
     }
 }
 
+void buttonsSuppressHeldClicks() {
+    primaryGesture.suppressClickOnThisPress();
+    secondaryGesture.suppressClickOnThisPress();
+}
+
 }  // namespace hal

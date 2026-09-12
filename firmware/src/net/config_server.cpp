@@ -268,6 +268,9 @@ void handleCaptiveProbe() {
 
 void configServerBegin(const ConfigServerData& next) {
     data = next;
+    // Binding a listen socket requires the tcpip task. WiFi.mode() is what
+    // starts it; calling begin() first asserts in xQueueSemaphoreTake.
+    WiFi.mode(WIFI_STA);
     server.on("/", HTTP_GET, handleRoot);
     server.on("/scan", HTTP_POST, handleScan);
     server.on("/networks", HTTP_POST, handleNetworks);

@@ -33,6 +33,10 @@ constexpr uint32_t kDimAfterMs = 30000;
 constexpr uint32_t kSleepAfterMs = 120000;
 constexpr uint32_t kSleepNoticeMs = 700;
 constexpr uint32_t kPortalNoticeMs = 900;
+// The Feather's middle button is both wake and Sleep. A tap that woke us
+// can still be in flight as a click after the HAL release-wait; ignore it
+// for a beat so that press cannot put the device straight back under.
+constexpr uint32_t kIgnoreSleepClickAfterWakeMs = 1500;
 
 std::vector<BusStopConfig> busStops;
 std::vector<WifiNetwork> wifiNetworks;
@@ -45,11 +49,13 @@ uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
 bool noStopsRendered = false;
 bool offlineRendered = false;
+bool connectingRendered = false;
 bool inConfigScreen = false;
 bool timeSynced = false;
 WifiLinkState lastLinkState = WifiLinkState::Backoff;
 
 uint32_t lastInteractionMillis = 0;
+uint32_t ignoreSleepClickUntilMs = 0;
 PowerMode powerMode = PowerMode::Awake;
 
 std::vector<BusService> cachedServices;
@@ -219,11 +225,13 @@ void enterSleep() {
     currentPage = 0;
     noStopsRendered = false;
     offlineRendered = false;
+    connectingRendered = false;
     inConfigScreen = false;
     needsImmediateFetch = true;
     lastPollMillis = millis();
     powerMode = PowerMode::Awake;
     noteInteraction();
+    ignoreSleepClickUntilMs = millis() + kIgnoreSleepClickAfterWakeMs;
 }
 
 bool applyPowerMode() {
@@ -283,6 +291,7 @@ void onLinkState(WifiLinkState next) {
         currentPage = 0;
         noStopsRendered = false;
         offlineRendered = false;
+        connectingRendered = false;
         needsImmediateFetch = true;
         lastPollMillis = millis();
         noteInteraction();
@@ -314,8 +323,12 @@ void setup() {
 
     logWifiDiagnostics();
 
+    // lwIP's socket mutex does not exist until the WiFi driver is started.
+    // WebServer::begin() (and esp_wifi_get_config) take that mutex, so mode
+    // has to come up before either of them — including when we already have
+    // saved networks and would otherwise skip straight to the config server.
+    WiFi.mode(WIFI_STA);
     if (!wifiNetworksKeyExists()) {
-        WiFi.mode(WIFI_STA);
         WifiNetwork imported;
         if (wifiLinkImportStaCredentials(&imported)) {
             wifiNetworks = {imported};
@@ -388,7 +401,8 @@ void loop() {
         return;
     }
 
-    if (hal::wasClicked(hal::Button::Sleep)) {
+    if (hal::wasClicked(hal::Button::Sleep) &&
+        static_cast<int32_t>(millis() - ignoreSleepClickUntilMs) >= 0) {
         enterSleep();
         return;
     }
@@ -399,7 +413,10 @@ void loop() {
         return;
     }
 
-    if (applyPowerMode()) {
+    // A connect after light sleep can take longer than the dim delay. The
+    // idle clock still runs, but sleeping mid-associate just puts us back
+    // here with the radio off again.
+    if (!wifiLinkConnecting() && applyPowerMode()) {
         return;
     }
 
@@ -408,10 +425,21 @@ void loop() {
         return;
     }
 
+    if (wifiLinkConnecting()) {
+        if (!connectingRendered) {
+            displayShowStatus("Connecting WiFi...");
+            connectingRendered = true;
+            offlineRendered = false;
+        }
+        delay(50);
+        return;
+    }
+
     if (!wifiLinkConnected()) {
         if (!offlineRendered && !inConfigScreen) {
             displayShowWifiOffline();
             offlineRendered = true;
+            connectingRendered = false;
         }
         delay(50);
         return;

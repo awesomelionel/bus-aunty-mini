@@ -32,8 +32,14 @@ constexpr uint32_t kPreSleepReleaseWaitMs = 5000;
 // it. Bounded either way so a stuck button cannot hang the device.
 constexpr uint32_t kWakeReleaseWaitMs = 1000;
 
-bool anyButtonPressed() {
-    return isPressed(Button::Primary) || isPressed(Button::Secondary);
+bool anyButtonPhysicallyDown() {
+    for (const WakePin& wake : kWakePins) {
+        const bool high = digitalRead(wake.pin) == HIGH;
+        if (wake.activeLow ? !high : high) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void waitForButtonRelease(uint32_t timeoutMs) {
@@ -41,7 +47,7 @@ void waitForButtonRelease(uint32_t timeoutMs) {
     do {
         buttonsUpdate();
         delay(10);
-    } while (anyButtonPressed() && millis() - startedAt < timeoutMs);
+    } while (anyButtonPhysicallyDown() && millis() - startedAt < timeoutMs);
 
     // The update that accepts the release is also the one that reports the
     // click, and it happens in here rather than in the main loop, so the wake
@@ -75,6 +81,7 @@ void sleepUntilButtonPress() {
     }
 
     waitForButtonRelease(kWakeReleaseWaitMs);
+    buttonsSuppressHeldClicks();
 }
 
 }  // namespace hal

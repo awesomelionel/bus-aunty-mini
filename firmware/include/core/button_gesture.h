@@ -36,6 +36,10 @@ class ButtonGesture {
     bool wasClicked() const { return wasClicked_; }
     bool wasHold() const { return wasHold_; }
 
+    // The press that woke the device is not a click: if the finger is still
+    // down, the coming release must not page or sleep.
+    void suppressClickOnThisPress();
+
  private:
     uint32_t holdThresholdMs_;
     uint32_t debounceMs_;

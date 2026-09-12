@@ -175,6 +175,19 @@ void test_the_hold_threshold_is_configurable() {
     TEST_ASSERT_TRUE(sawHold);
 }
 
+void test_suppress_click_on_this_press() {
+    ButtonGesture gesture(kHoldMs);
+
+    uint32_t now = hold(gesture, false, 0, 100);
+    now = hold(gesture, true, now, 100);
+    TEST_ASSERT_TRUE(gesture.isPressed());
+    gesture.suppressClickOnThisPress();
+
+    now = hold(gesture, false, now, 100);
+    TEST_ASSERT_FALSE(gesture.wasClicked());
+    TEST_ASSERT_FALSE(gesture.wasHold());
+}
+
 void setup() {}
 void loop() {}
 
@@ -188,5 +201,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_a_second_press_can_hold_again);
     RUN_TEST(test_survives_the_millis_rollover);
     RUN_TEST(test_the_hold_threshold_is_configurable);
+    RUN_TEST(test_suppress_click_on_this_press);
     return UNITY_END();
 }

@@ -43,6 +43,8 @@ bool wifiLinkImportStaCredentials(WifiNetwork* out);
 
 WifiLinkState wifiLinkState();
 bool wifiLinkConnected();
+// Fast-path, scan, or associate in flight — not yet a failure.
+bool wifiLinkConnecting();
 std::string wifiLinkCurrentSsid();
 std::string wifiLinkIp();
 uint32_t wifiLinkBackoffEndsAt();

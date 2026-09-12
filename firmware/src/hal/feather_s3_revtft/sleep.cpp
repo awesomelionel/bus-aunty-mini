@@ -20,11 +20,17 @@ constexpr uint32_t kPreSleepReleaseWaitMs = 5000;
 // it. Bounded either way so a stuck button cannot hang the device.
 constexpr uint32_t kWakeReleaseWaitMs = 1000;
 
-// Every physical button, once each: Sleep shares the middle one with
-// Secondary, so naming those three covers the board.
-bool anyButtonPressed() {
-    return isPressed(Button::Primary) || isPressed(Button::Previous) ||
-           isPressed(Button::Secondary);
+// Raw pin, not the debounced gesture. After light sleep the gesture still
+// thinks every button is up; using isPressed() here returns immediately and
+// the D1 release is then delivered to the main loop as a Sleep click.
+bool anyButtonPhysicallyDown() {
+    for (const feather::ButtonPin& button : feather::kButtonPins) {
+        const bool high = digitalRead(button.gpio) == HIGH;
+        if (button.activeLow ? !high : high) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void waitForButtonRelease(uint32_t timeoutMs) {
@@ -32,11 +38,18 @@ void waitForButtonRelease(uint32_t timeoutMs) {
     do {
         buttonsUpdate();
         delay(10);
-    } while (anyButtonPressed() && millis() - startedAt < timeoutMs);
+    } while (anyButtonPhysicallyDown() && millis() - startedAt < timeoutMs);
 
-    // The update that accepts the release is also the one that reports the
-    // click, and it happens in here rather than in the main loop, so the wake
-    // press is consumed instead of being read as a page or a stop change.
+    // Drain the debounce window so pressed_ matches the pin, and so the
+    // update that reports the click happens here rather than in loop().
+    uint32_t drainAt = millis();
+    do {
+        buttonsUpdate();
+        delay(10);
+    } while ((isPressed(Button::Primary) || isPressed(Button::Previous) ||
+              isPressed(Button::Secondary)) &&
+             millis() - drainAt < 30);
+
     buttonsUpdate();
 }
 
@@ -73,6 +86,7 @@ void sleepUntilButtonPress() {
     }
 
     waitForButtonRelease(kWakeReleaseWaitMs);
+    buttonsSuppressHeldClicks();
 }
 
 }  // namespace hal

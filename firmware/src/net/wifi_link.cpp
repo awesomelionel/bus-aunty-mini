@@ -25,6 +25,7 @@ bool scanInProgress = false;
 bool visibleScanOnly = false;
 bool beginIssued = false;
 bool busy = false;
+bool wakeAttempt = false;
 
 const char* stateName(WifiLinkState s) {
     switch (s) {
@@ -193,10 +194,14 @@ void tickFastPath(uint32_t nowMs) {
     }
     if (WiFi.status() == WL_CONNECTED) {
         rememberCurrent();
+        wakeAttempt = false;
         enter(WifiLinkState::Connected, nowMs);
         return;
     }
-    if (nowMs - actionStartedAt >= kWifiConnectTimeoutMs) {
+    const uint32_t timeoutMs =
+        wakeAttempt ? kWifiWakeConnectTimeoutMs : kWifiConnectTimeoutMs;
+    if (nowMs - actionStartedAt >= timeoutMs) {
+        wakeAttempt = false;
         enter(WifiLinkState::Scanning, nowMs);
     }
 }
@@ -332,6 +337,11 @@ void wifiLinkPrepareSleep() {
 void wifiLinkOnWake() {
     WiFi.mode(WIFI_STA);
     uint32_t nowMs = millis();
+    wakeAttempt = true;
+    if (lastSsid.empty() && !networks.empty()) {
+        lastSsid = networks[0].ssid;
+        lastPass = networks[0].password;
+    }
     if (!lastSsid.empty()) {
         enter(WifiLinkState::FastPath, nowMs);
         return;
@@ -379,6 +389,12 @@ WifiLinkState wifiLinkState() { return state; }
 
 bool wifiLinkConnected() {
     return state == WifiLinkState::Connected && WiFi.status() == WL_CONNECTED;
+}
+
+bool wifiLinkConnecting() {
+    return state == WifiLinkState::FastPath ||
+           state == WifiLinkState::Scanning ||
+           state == WifiLinkState::Connecting;
 }
 
 std::string wifiLinkCurrentSsid() { return currentSsid; }

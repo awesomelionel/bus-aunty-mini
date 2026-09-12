@@ -9,6 +9,9 @@
 constexpr uint32_t kWifiBackoffStepsMs[] = {5000, 15000, 60000};
 constexpr uint32_t kWifiUpgradeIntervalMs = 300000;
 constexpr uint32_t kWifiConnectTimeoutMs = 10000;
+// Cold start after light sleep is a full associate + DHCP, longer than a
+// typical reconnect on an already-up driver.
+constexpr uint32_t kWifiWakeConnectTimeoutMs = 20000;
 constexpr uint32_t kWifiUnlockWindowMs = 300000;
 
 // Saved-list indices of networks whose SSID appears in `seen`, in saved
