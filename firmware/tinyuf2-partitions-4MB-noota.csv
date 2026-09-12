@@ -1,0 +1,14 @@
+# ESP-IDF Partition Table
+# Name,   Type, SubType, Offset,  Size, Flags
+# bootloader.bin,,          0x1000, 32K
+# partition table,          0x8000, 4K
+#
+# Vendored from arduino-esp32. The official PlatformIO espressif32 6/7
+# packages do not ship this file, so CI cannot find it unless it lives here.
+# One 2816K app slot (no OTA) plus the TinyUF2 factory partition.
+
+nvs,      data, nvs,      0x9000,  20K,
+otadata,  data, ota,      0xe000,  8K,
+ota_0,    app,  ota_0,   0x10000,  2816K,
+uf2,      app,  factory,0x2d0000,  256K,
+ffat,     data, fat,    0x310000,  960K,
