@@ -19,6 +19,7 @@ BusArrival readArrival(JsonVariantConst nextBus) {
     }
     arrival.etaEpoch = parseIso8601ToEpoch(iso);
     arrival.load = parseBusLoad(nextBus["Load"] | "");
+    arrival.type = parseBusType(nextBus["Type"] | "");
     return arrival;
 }
 
@@ -82,6 +83,19 @@ BusLoad parseBusLoad(const std::string& raw) {
         return BusLoad::LimitedStanding;
     }
     return BusLoad::Unknown;
+}
+
+BusType parseBusType(const std::string& raw) {
+    if (raw == "SD") {
+        return BusType::SingleDeck;
+    }
+    if (raw == "DD") {
+        return BusType::DoubleDeck;
+    }
+    if (raw == "BD") {
+        return BusType::Bendy;
+    }
+    return BusType::Unknown;
 }
 
 size_t servicePageCount(size_t serviceCount, size_t pageSize) {

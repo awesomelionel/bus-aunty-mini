@@ -245,8 +245,21 @@ rendered for them at all.
 
 It turns dark on its own between 19:00 and 07:00 local, in Windows' own High
 Contrast Black rather than a dimmed version of the day palette — silver chrome
-at 3am is a lamp. Day draws the load colours from the VGA 16 on white; night
-uses the bright ones on black. The sprite is 8-bit, so the panel shows the
+at 3am is a lamp.
+
+A double decker is marked with two stacked bars to the left of its arrival
+time, in the same colour as that time. The feed carries `Type` on each arrival
+rather than on the service, so the marker follows the individual bus — a
+service can have a double decker next and a single after it. Only double
+deckers are marked: a six-pixel glyph distinguishing single, double and bendy
+would distinguish none of them, and an unreadable type is left unmarked rather
+than guessed at.
+
+Night draws the load colours bright on black. Day lifts standing and limited
+in both saturation and lightness rather than using the period-correct olive
+and maroon, which sat at nearly the same brightness as each other and as the
+black service number beside them — on a white list, the three ran together at
+19px. The sprite is 8-bit, so the panel shows the
 nearest RGB332: greens, yellows and reds survive intact, while blue has only
 two bits and the navy title bar reads slightly brighter than its `000080`.
 

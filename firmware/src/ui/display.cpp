@@ -193,12 +193,16 @@ struct Palette {
     uint32_t seats, stand, limit, dim;
 };
 
-// The VGA 16 on a silver ground.
+// The chrome is the VGA 16 on a silver ground. The load colours are not: the
+// period-correct olive and maroon sat at almost the same brightness as each
+// other and as the black service number beside them, so on a white list they
+// collapsed into one another at 19px. Standing and limited are pushed up in
+// both saturation and lightness so the three differ by more than hue alone.
 constexpr Palette kDayPalette = {
     /*chrome=*/0xC0C0C0, /*face=*/0xFFFFFF, /*ink=*/0x000000,
     /*hi=*/0xFFFFFF,     /*lo=*/0x808080,
     /*capA=*/0x000080,   /*capB=*/0x1084D0, /*capInk=*/0xFFFFFF,
-    /*seats=*/0x008000,  /*stand=*/0x7A6000, /*limit=*/0xA00000,
+    /*seats=*/0x008000,  /*stand=*/0xE07800, /*limit=*/0xD00000,
     /*dim=*/0x606060,
 };
 
@@ -224,6 +228,28 @@ bool win95Theme = false;
 const Palette& paletteFor(int64_t nowEpoch) {
     return isNightAt(nowEpoch, kLocalUtcOffsetSeconds) ? kNightPalette
                                                        : kDayPalette;
+}
+
+// There is no bold DejaVu on the device, so weight comes from drawing the
+// glyphs twice, a pixel apart. Which way it spreads matters: right-aligned
+// text has to grow leftward or it walks out of the column it is aligned to.
+void drawBoldString(const char* text, int x, int y, bool growLeft) {
+    canvas.drawString(text, x, y);
+    canvas.drawString(text, growLeft ? x - 1 : x + 1, y);
+}
+
+// Two stacked bars, which is about all a 25px row can spare and still read as
+// two decks. Drawn only for a double decker: a marker that tries to mean
+// single, double and bendy at six pixels across means none of them, and the
+// feed's single deck is the unremarkable case anyway.
+constexpr int kDeckMarkerWidth = 6;
+constexpr int kDeckMarkerHeight = 9;
+constexpr int kDeckMarkerGap = 3;
+
+void drawDoubleDeckMarker(int right, int top, uint32_t color) {
+    const int x = right - kDeckMarkerWidth;
+    canvas.fillRect(x, top, kDeckMarkerWidth, 4, color);
+    canvas.fillRect(x, top + 5, kDeckMarkerWidth, 4, color);
 }
 
 // A 1px bevel rather than the portal's 2px one: at this size the second pixel
@@ -385,8 +411,7 @@ void drawFramedArrivals(const std::string& stopLabel,
     const std::string title = stopLabel + "  " +
                               std::to_string(currentStopIndex + 1) + " of " +
                               std::to_string(totalStops);
-    canvas.drawString(title.c_str(), 4, 3);
-    canvas.drawString(title.c_str(), 5, 3);  // faux bold
+    drawBoldString(title.c_str(), 4, 3, /*growLeft=*/false);
 
     // Window buttons, right to left, so they stay put as the title grows.
     int bx = w - 3 - 13;
@@ -430,8 +455,8 @@ void drawFramedArrivals(const std::string& stopLabel,
 
         canvas.setTextColor(p.ink);
         canvas.setTextDatum(top_left);
-        canvas.drawString(svc.serviceNo.c_str(),
-                          arrivalsLayout.serviceColX + 2, y);
+        drawBoldString(svc.serviceNo.c_str(), arrivalsLayout.serviceColX + 2,
+                       y, /*growLeft=*/false);
 
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
@@ -446,10 +471,28 @@ void drawFramedArrivals(const std::string& stopLabel,
                 case BusLoad::Unknown: tint = p.ink; break;
             }
             canvas.setTextColor(tint);
-            canvas.drawString(eta.c_str(), arrivalsLayout.etaColRightX[col], y);
+            drawBoldString(eta.c_str(), arrivalsLayout.etaColRightX[col], y,
+                           /*growLeft=*/true);
             if (eta == kEtaArrivingLabel) {
+                // One pass more than the rest of the row. An arriving bus was
+                // emphasised by being the only bold thing here; now that
+                // everything is bold it needs the extra to keep saying
+                // anything, and colour is already spoken for by load.
                 canvas.drawString(eta.c_str(),
-                                  arrivalsLayout.etaColRightX[col] - 1, y);
+                                  arrivalsLayout.etaColRightX[col] - 2, y);
+            }
+
+            // Sits to the left of the time it belongs to, measured rather
+            // than assumed because the column is right-aligned and "Arr" is
+            // wider than "3".
+            if (arrival.type == BusType::DoubleDeck) {
+                // Plus the pixel the bold pass spreads leftward, or the gap
+                // closes up against a glyph only six pixels wide.
+                const int textWidth = canvas.textWidth(eta.c_str()) + 1;
+                drawDoubleDeckMarker(
+                    arrivalsLayout.etaColRightX[col] - textWidth -
+                        kDeckMarkerGap,
+                    y + (rowHeight - kDeckMarkerHeight) / 2, tint);
             }
         }
     }

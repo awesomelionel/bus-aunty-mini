@@ -40,6 +40,61 @@ void test_parses_load_for_each_arrival() {
                       result.services[0].arrivals[2].load);
 }
 
+// Type rides on each NextBus, not on the service, so a double decker in front
+// of a single has to come back that way round.
+void test_parses_vehicle_type_for_each_arrival() {
+    const char* json = R"JSON({
+      "busStops": [
+        {
+          "BusStopCode": "67379",
+          "Services": [
+            {
+              "ServiceNo": "123",
+              "NextBus": {"EstimatedArrival": "2024-03-20T12:34:56Z", "Type": "DD"},
+              "NextBus2": {"EstimatedArrival": "2024-03-20T12:44:56Z", "Type": "SD"},
+              "NextBus3": {"EstimatedArrival": "2024-03-20T12:54:56Z", "Type": "BD"}
+            }
+          ]
+        }
+      ]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "67379");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(BusType::DoubleDeck, result.services[0].arrivals[0].type);
+    TEST_ASSERT_EQUAL(BusType::SingleDeck, result.services[0].arrivals[1].type);
+    TEST_ASSERT_EQUAL(BusType::Bendy, result.services[0].arrivals[2].type);
+}
+
+void test_vehicle_type_codes_map_to_decks() {
+    TEST_ASSERT_EQUAL(BusType::SingleDeck, parseBusType("SD"));
+    TEST_ASSERT_EQUAL(BusType::DoubleDeck, parseBusType("DD"));
+    TEST_ASSERT_EQUAL(BusType::Bendy, parseBusType("BD"));
+}
+
+// An unreadable type must not become a double decker: the marker is a promise
+// about the bus turning up, and a wrong one is worse than none.
+void test_unrecognised_vehicle_type_is_unknown() {
+    TEST_ASSERT_EQUAL(BusType::Unknown, parseBusType(""));
+    TEST_ASSERT_EQUAL(BusType::Unknown, parseBusType("dd"));
+    TEST_ASSERT_EQUAL(BusType::Unknown, parseBusType("XYZ"));
+}
+
+void test_missing_vehicle_type_field_is_unknown() {
+    const char* json = R"JSON({
+      "busStops": [
+        {
+          "BusStopCode": "67379",
+          "Services": [
+            { "ServiceNo": "5", "NextBus": {"EstimatedArrival": "2024-03-20T12:34:56Z"} }
+          ]
+        }
+      ]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "67379");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(BusType::Unknown, result.services[0].arrivals[0].type);
+}
+
 void test_load_codes_map_to_crowding_levels() {
     TEST_ASSERT_EQUAL(BusLoad::SeatsAvailable, parseBusLoad("SEA"));
     TEST_ASSERT_EQUAL(BusLoad::StandingAvailable, parseBusLoad("SDA"));
@@ -179,6 +234,10 @@ int main(int argc, char** argv) {
     UNITY_BEGIN();
     RUN_TEST(test_parses_service_and_three_etas);
     RUN_TEST(test_parses_load_for_each_arrival);
+    RUN_TEST(test_parses_vehicle_type_for_each_arrival);
+    RUN_TEST(test_vehicle_type_codes_map_to_decks);
+    RUN_TEST(test_unrecognised_vehicle_type_is_unknown);
+    RUN_TEST(test_missing_vehicle_type_field_is_unknown);
     RUN_TEST(test_load_codes_map_to_crowding_levels);
     RUN_TEST(test_unrecognised_load_is_unknown);
     RUN_TEST(test_missing_load_field_is_unknown);
