@@ -7,8 +7,10 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <string>
 
-#include "core/html_escape.h"
+#include "board/board.h"
+#include "config_page.h"
 #include "core/wifi_policy.h"
 #include "net/wifi_link.h"
 
@@ -21,158 +23,82 @@ uint32_t unlockUntilMs = 0;
 bool captiveDns = false;
 bool mdnsUp = false;
 
-void sendHtml(const String& body) {
-    server.send(200, "text/html; charset=utf-8", body);
-}
+// Set by /apply and acted on after the response has gone out. Applying inline
+// would disconnect the browser mid-request: wifiLinkSetNetworks() drops the
+// setup AP, which is the very link the reply has to travel back over.
+bool applyPending = false;
 
-void sendLocked() {
-    sendHtml(
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Bus Aunty</title></head><body>"
-        "<p>Press the button on your device to unlock settings.</p>"
-        "</body></html>");
-}
-
-bool requireUnlock() {
-    if (configServerIsUnlocked(millis())) {
-        return true;
-    }
-    sendLocked();
-    return false;
-}
+bool apMode() { return wifiLinkState() == WifiLinkState::ApFallback; }
 
 void redirectHome() {
     server.sendHeader("Location", "/", true);
     server.send(303, "text/plain", "");
 }
 
+void renderSettings(const std::string& error) {
+    config_page::Model model;
+    model.networks = data.networks;
+    model.stops = data.stops;
+    model.visibleSsids = wifiLinkVisibleSsids();
+    model.alwaysOn = data.alwaysOn != nullptr && *data.alwaysOn;
+    model.win95Theme = data.win95Theme != nullptr && *data.win95Theme;
+    model.supportsFramedTheme = board().supportsFramedTheme;
+    model.apMode = apMode();
+    model.error = error;
+    config_page::sendSettings(server, model);
+}
+
+// While the setup AP is up, the AP's WPA2 password is already the gate --
+// nobody reaches this server without it -- and a five-minute window that
+// expires mid-setup just loses the user's typing. On the LAN the window still
+// applies, but any request refreshes it, so a slow form fill cannot strand
+// someone either.
+bool requireUnlock() {
+    if (apMode()) {
+        return true;
+    }
+    if (configServerIsUnlocked(millis())) {
+        configServerUnlock(millis());
+        return true;
+    }
+    config_page::sendLocked(server);
+    return false;
+}
+
 void markNetworksDirty() {
     if (data.networksDirty != nullptr) {
         *data.networksDirty = true;
     }
-    wifiLinkSetNetworks(*data.networks);
+    // Deliberately does not call wifiLinkSetNetworks(). Edits are persisted by
+    // the main loop and only take to the air when the user presses Save &
+    // Connect, so adding a network cannot pull the ground out from under the
+    // page that added it.
 }
 
-String networkRows() {
-    String html;
-    const std::vector<WifiNetwork>& nets = *data.networks;
-    for (size_t i = 0; i < nets.size(); ++i) {
-        const char* placeholder = nets[i].password.empty()
-                                      ? "open network — leave blank"
-                                      : "saved — leave blank to keep";
-        html += "<li><form method='post' action='/networks' accept-charset='utf-8'>";
-        html += "<input type='hidden' name='index' value='";
-        html += String(static_cast<unsigned>(i));
-        html += "'>";
-        html += "<strong>";
-        html += escapeHtml(nets[i].ssid).c_str();
-        html += "</strong> ";
-        html += "<input type='password' name='password' value='' placeholder='";
-        html += escapeHtml(placeholder).c_str();
-        html += "'>";
-        html += "<button name='action' value='save_pass'>Save</button>";
-        if (i > 0) {
-            html += "<button name='action' value='up'>Up</button>";
-        }
-        if (i + 1 < nets.size()) {
-            html += "<button name='action' value='down'>Down</button>";
-        }
-        html += "<button name='action' value='delete'>Delete</button>";
-        html += "</form></li>";
-    }
-    return html;
-}
-
-String scanOptions() {
-    String html;
-    html += "<option value=''>Choose a network</option>";
-    for (const std::string& ssid : wifiLinkVisibleSsids()) {
-        html += "<option value='";
-        html += escapeHtml(ssid).c_str();
-        html += "'>";
-        html += escapeHtml(ssid).c_str();
-        html += "</option>";
-    }
-    return html;
-}
-
-String stopFields() {
-    String html;
-    const std::vector<BusStopConfig>& stops = *data.stops;
+void parseStops() {
+    std::vector<BusStopConfig> rows;
+    rows.reserve(kMaxBusStops);
     for (size_t i = 0; i < kMaxBusStops; ++i) {
-        const char* code = i < stops.size() ? stops[i].code.c_str() : "";
-        const char* name = i < stops.size() ? stops[i].name.c_str() : "";
-        html += "<p>Stop ";
-        html += String(static_cast<unsigned>(i + 1));
-        html += " <input name='code";
-        html += String(static_cast<unsigned>(i + 1));
-        html += "' value='";
-        html += escapeHtml(code).c_str();
-        html += "' maxlength='5' inputmode='numeric' placeholder='00481'> ";
-        html += "<input name='name";
-        html += String(static_cast<unsigned>(i + 1));
-        html += "' value='";
-        html += escapeHtml(name).c_str();
-        html += "' maxlength='16' placeholder='Home'></p>";
+        char codeId[8];
+        char nameId[8];
+        std::snprintf(codeId, sizeof(codeId), "code%u",
+                      static_cast<unsigned>(i + 1));
+        std::snprintf(nameId, sizeof(nameId), "name%u",
+                      static_cast<unsigned>(i + 1));
+        rows.push_back({std::string(server.arg(codeId).c_str()),
+                        std::string(server.arg(nameId).c_str())});
     }
-    return html;
+    *data.stops = buildBusStopList(rows);
+    if (data.stopsDirty != nullptr) {
+        *data.stopsDirty = true;
+    }
 }
 
 void handleRoot() {
     if (!requireUnlock()) {
         return;
     }
-    String html;
-    html +=
-        "<!doctype html><html><head><meta charset='utf-8'>"
-        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>Bus Aunty</title>"
-        "<style>body{font-family:sans-serif;max-width:40em;margin:1em}"
-        "li{margin:0.6em 0}button{margin-right:0.3em}</style>"
-        "</head><body><h1>Bus Aunty</h1>";
-
-    html += "<h2>WiFi networks</h2><p>Top of the list is tried first.</p><ol>";
-    html += networkRows();
-    html += "</ol>";
-    html +=
-        "<form method='post' action='/scan'><button>Rescan nearby "
-        "networks</button></form>";
-    html +=
-        "<form method='post' action='/networks' accept-charset='utf-8'>"
-        "<input type='hidden' name='action' value='add'>"
-        "<p><select name='scan_ssid'>";
-    html += scanOptions();
-    html +=
-        "</select></p>"
-        "<p><input name='ssid' placeholder='or type SSID'></p>"
-        "<p><input type='password' name='password' placeholder='password'></p>"
-        "<p><button>Add network</button></p></form>";
-
-    html +=
-        "<h2>Bus stops</h2>"
-        "<p>Up to 4 bus stops. The code is required: 3-5 digits, keeping any "
-        "leading zeros (e.g. 00481). The name is optional and falls back to "
-        "the code. A name with no code is ignored.</p>"
-        "<form method='post' action='/stops' accept-charset='utf-8'>";
-    html += stopFields();
-    html += "<p><button>Save stops</button></p></form>";
-
-    html +=
-        "<h2>Always on</h2>"
-        "<p>Tick this if the device stays plugged in. It cannot always tell "
-        "mains power from a full battery, so left unticked a permanently "
-        "powered device will still dim and sleep.</p>"
-        "<form method='post' action='/alwayson'>"
-        "<p><label><input type='checkbox' name='alwayson' value='T'";
-    if (data.alwaysOn != nullptr && *data.alwaysOn) {
-        html += " checked";
-    }
-    html +=
-        "> Always on (skip dimming and sleep)</label></p>"
-        "<p><button>Save</button></p></form>";
-    html += "</body></html>";
-    sendHtml(html);
+    renderSettings("");
 }
 
 void handleScan() {
@@ -197,6 +123,10 @@ void handleNetworks() {
         row.ssid = typed.length() > 0 ? std::string(typed.c_str())
                                       : std::string(scanned.c_str());
         row.password = std::string(server.arg("password").c_str());
+        if (row.ssid.empty()) {
+            renderSettings("Pick a network from the list or type its name.");
+            return;
+        }
         std::vector<WifiNetwork> incoming = nets;
         incoming.push_back(row);
         nets = mergeWifiPasswords(nets, incoming);
@@ -216,7 +146,8 @@ void handleNetworks() {
                 markNetworksDirty();
             } else if (action == "save_pass") {
                 std::vector<WifiNetwork> incoming = nets;
-                incoming[i].password = std::string(server.arg("password").c_str());
+                incoming[i].password =
+                    std::string(server.arg("password").c_str());
                 nets = mergeWifiPasswords(nets, incoming);
                 markNetworksDirty();
             }
@@ -229,32 +160,56 @@ void handleStops() {
     if (!requireUnlock()) {
         return;
     }
-    std::vector<BusStopConfig> rows;
-    rows.reserve(kMaxBusStops);
-    for (size_t i = 0; i < kMaxBusStops; ++i) {
-        char codeId[8];
-        char nameId[8];
-        std::snprintf(codeId, sizeof(codeId), "code%u",
-                      static_cast<unsigned>(i + 1));
-        std::snprintf(nameId, sizeof(nameId), "name%u",
-                      static_cast<unsigned>(i + 1));
-        rows.push_back({std::string(server.arg(codeId).c_str()),
-                        std::string(server.arg(nameId).c_str())});
-    }
-    *data.stops = buildBusStopList(rows);
-    if (data.stopsDirty != nullptr) {
-        *data.stopsDirty = true;
-    }
+    parseStops();
     redirectHome();
 }
 
-void handleAlwaysOn() {
+// Saves the stops on the way past, because the stop fields and this button are
+// one form: pressing Connect can never commit the radio to a network while
+// leaving the stops the user just typed behind.
+void handleApply() {
+    if (!requireUnlock()) {
+        return;
+    }
+    parseStops();
+
+    if (data.stops->empty()) {
+        renderSettings(
+            "Add at least one bus stop before connecting, or the device will "
+            "join your WiFi with nothing to show.");
+        return;
+    }
+    if (data.networks->empty()) {
+        renderSettings("Add a WiFi network below before connecting.");
+        return;
+    }
+
+    applyPending = true;
+    config_page::sendConnecting(server, (*data.networks)[0].ssid);
+}
+
+// Both display settings arrive from one form with one Apply button, so this
+// reads both every time: an unchecked box sends nothing, which is only
+// distinguishable from "left alone" because the whole form posts together.
+void handleDisplay() {
     if (!requireUnlock()) {
         return;
     }
     *data.alwaysOn = server.hasArg("alwayson");
     if (data.alwaysOnDirty != nullptr) {
         *data.alwaysOnDirty = true;
+    }
+    // Guarded by the board as well as by the page that drew the control: a
+    // hand-made POST must not be able to put a 240x135 panel into a theme it
+    // cannot show.
+    if (data.win95Theme != nullptr && board().supportsFramedTheme) {
+        const bool wanted = server.hasArg("win95");
+        if (wanted != *data.win95Theme) {
+            *data.win95Theme = wanted;
+            if (data.win95ThemeDirty != nullptr) {
+                *data.win95ThemeDirty = true;
+            }
+        }
     }
     redirectHome();
 }
@@ -275,7 +230,8 @@ void configServerBegin(const ConfigServerData& next) {
     server.on("/scan", HTTP_POST, handleScan);
     server.on("/networks", HTTP_POST, handleNetworks);
     server.on("/stops", HTTP_POST, handleStops);
-    server.on("/alwayson", HTTP_POST, handleAlwaysOn);
+    server.on("/apply", HTTP_POST, handleApply);
+    server.on("/display", HTTP_POST, handleDisplay);
     server.on("/generate_204", HTTP_GET, handleCaptiveProbe);
     server.on("/hotspot-detect.html", HTTP_GET, handleCaptiveProbe);
     server.onNotFound(handleRoot);
@@ -287,6 +243,14 @@ void configServerTick() {
         dns.processNextRequest();
     }
     server.handleClient();
+
+    if (applyPending) {
+        applyPending = false;
+        // handleClient() has written the reply; give the socket a moment to
+        // drain before the radio it travelled over is reconfigured.
+        delay(120);
+        wifiLinkSetNetworks(*data.networks);
+    }
 }
 
 void configServerUnlock(uint32_t nowMs) {
