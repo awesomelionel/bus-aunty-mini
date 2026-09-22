@@ -9,6 +9,7 @@
 
 #include "core/arrival_parser.h"
 #include "core/bus_stop_config.h"
+#include "core/night_window.h"
 #include "core/sleep_policy.h"
 #include "core/wifi_credentials.h"
 #include "hal/buttons.h"
@@ -41,9 +42,11 @@ constexpr uint32_t kIgnoreSleepClickAfterWakeMs = 1500;
 std::vector<BusStopConfig> busStops;
 std::vector<WifiNetwork> wifiNetworks;
 bool alwaysOn = false;
+bool win95Theme = false;
 bool networksDirty = false;
 bool stopsDirty = false;
 bool alwaysOnDirty = false;
+bool win95ThemeDirty = false;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
 bool needsImmediateFetch = true;
@@ -101,6 +104,18 @@ void persistDirtySettings() {
         saveAlwaysOn(alwaysOn);
         alwaysOnDirty = false;
     }
+    if (win95ThemeDirty) {
+        saveWin95Theme(win95Theme);
+        win95ThemeDirty = false;
+        // Applied here as well as saved, because this is the one place that
+        // knows the setting just changed. The chrome costs a row, so the
+        // layout and the paging both have to be rebuilt: a page index from
+        // the old five-row screen can point past the end of a four-row one.
+        displaySetTheme(win95Theme);
+        currentPage = 0;
+        cachedServices.clear();
+        needsImmediateFetch = wifiLinkConnected();
+    }
     if (networksDirty) {
         saveWifiNetworks(wifiNetworks);
         networksDirty = false;
@@ -122,7 +137,12 @@ void startSetupAp() {
 
 void syncTime() {
     displayShowStatus("Syncing time...");
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    // The offset reaches localtime() only: configTime() sets the TZ
+    // environment variable and never touches the system clock, so time()
+    // still returns UTC epoch seconds and every arrival calculation is
+    // unaffected. It is here so the framed screen's clock and its night
+    // window read as Singapore rather than UTC.
+    configTime(kLocalUtcOffsetSeconds, 0, "pool.ntp.org", "time.nist.gov");
 
     time_t now = time(nullptr);
     uint32_t startedAt = millis();
@@ -319,7 +339,13 @@ void setup() {
 
     busStops = loadBusStops();
     alwaysOn = loadAlwaysOn();
+    win95Theme = loadWin95Theme();
     wifiNetworks = loadWifiNetworks();
+
+    // displaySetup() has already run with the plain layout, because the panel
+    // has to be alive before NVS is worth reading. This is where the saved
+    // theme actually takes effect.
+    displaySetTheme(win95Theme);
 
     logWifiDiagnostics();
 
@@ -340,9 +366,11 @@ void setup() {
     config.networks = &wifiNetworks;
     config.stops = &busStops;
     config.alwaysOn = &alwaysOn;
+    config.win95Theme = &win95Theme;
     config.networksDirty = &networksDirty;
     config.stopsDirty = &stopsDirty;
     config.alwaysOnDirty = &alwaysOnDirty;
+    config.win95ThemeDirty = &win95ThemeDirty;
     configServerBegin(config);
 
     wifiLinkBegin(wifiNetworks);

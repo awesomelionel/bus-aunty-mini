@@ -15,7 +15,10 @@ namespace hal {
 using Gfx = M5GFX;
 using Canvas = M5Canvas;
 }  // namespace hal
-#elif defined(BOARD_FEATHER_S3_REVTFT)
+// The Feather and the T-Display-S3 share this branch: they are both driven by
+// stock LovyanGFX, and differ only in the bus and panel their own
+// src/hal/<board>/display_device.cpp configures.
+#elif defined(BOARD_FEATHER_S3_REVTFT) || defined(BOARD_TDISPLAY_S3)
 #include <LovyanGFX.hpp>
 namespace hal {
 using Gfx = LGFX_Device;

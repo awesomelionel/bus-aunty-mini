@@ -8,6 +8,14 @@
 #include "hal/power.h"
 
 void displaySetup();
+
+// Switches the arrivals screen between the plain list and the framed Windows
+// 95 treatment, and recomputes the layout for it. The chrome costs rows, so
+// servicesPerScreen() changes here and callers holding a page index have to
+// re-page. Ignored on boards whose panel is too short for the chrome, which
+// say so through BoardProfile::supportsFramedTheme.
+void displaySetTheme(bool win95);
+bool displayThemeIsWin95();
 // How many service rows fit under the header at the arrivals font size.
 // Depends on the panel's height and the font's measured row height, so it is
 // only meaningful after displaySetup().

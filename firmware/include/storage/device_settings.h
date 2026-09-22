@@ -10,3 +10,10 @@
 // desk clock on USB would otherwise doze off.
 bool loadAlwaysOn();
 bool saveAlwaysOn(bool alwaysOn);
+
+// Draws the arrivals screen as a Windows 95 window -- title bar, column
+// headers, status bar -- instead of the plain list. Off by default, because
+// the chrome costs a service row and only the 320x170 panel has the height to
+// spare; boards that do not, say so through BoardProfile and never offer it.
+bool loadWin95Theme();
+bool saveWin95Theme(bool enabled);

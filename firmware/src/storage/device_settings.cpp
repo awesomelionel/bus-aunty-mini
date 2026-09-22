@@ -7,25 +7,34 @@ namespace {
 
 constexpr char kNamespace[] = "busaunty";
 constexpr char kAlwaysOnKey[] = "alwayson";
+constexpr char kWin95ThemeKey[] = "win95";
 
-}  // namespace
-
-bool loadAlwaysOn() {
+bool loadFlag(const char* key, bool fallback) {
     Preferences prefs;
     if (!prefs.begin(kNamespace, /*readOnly=*/true)) {
-        return false;
+        return fallback;
     }
-    bool alwaysOn = prefs.getBool(kAlwaysOnKey, false);
+    bool value = prefs.getBool(key, fallback);
     prefs.end();
-    return alwaysOn;
+    return value;
 }
 
-bool saveAlwaysOn(bool alwaysOn) {
+bool saveFlag(const char* key, bool value) {
     Preferences prefs;
     if (!prefs.begin(kNamespace, /*readOnly=*/false)) {
         return false;
     }
-    bool ok = prefs.putBool(kAlwaysOnKey, alwaysOn);
+    bool ok = prefs.putBool(key, value);
     prefs.end();
     return ok;
 }
+
+}  // namespace
+
+bool loadAlwaysOn() { return loadFlag(kAlwaysOnKey, false); }
+
+bool saveAlwaysOn(bool alwaysOn) { return saveFlag(kAlwaysOnKey, alwaysOn); }
+
+bool loadWin95Theme() { return loadFlag(kWin95ThemeKey, false); }
+
+bool saveWin95Theme(bool enabled) { return saveFlag(kWin95ThemeKey, enabled); }

@@ -49,6 +49,23 @@ void test_a_taller_screen_fits_more_rows() {
     TEST_ASSERT_EQUAL_INT(316, layout.etaColRightX[kArrivalsPerService - 1]);
 }
 
+// The T-Display-S3's 320x170 panel at DejaVu24's row advance, which is 25 and
+// not 24. Its taller screen buys bigger text rather than more rows: five fit
+// here against the 240x135 boards' six at DejaVu18. Pinned so that a change
+// to either the font choice or the layout arithmetic has to be deliberate.
+void test_t_display_s3_layout_at_dejavu24() {
+    ArrivalsLayout layout =
+        computeArrivalsLayout(320, 170, 25, kBatteryReservedWidth);
+
+    TEST_ASSERT_EQUAL_size_t(5, layout.servicesPerScreen);
+    TEST_ASSERT_EQUAL_INT(4, layout.serviceColX);
+    TEST_ASSERT_EQUAL_INT(159, layout.etaColRightX[0]);
+    TEST_ASSERT_EQUAL_INT(238, layout.etaColRightX[1]);
+    TEST_ASSERT_EQUAL_INT(316, layout.etaColRightX[2]);
+    TEST_ASSERT_EQUAL_INT(146, layout.headerCenterX);
+    TEST_ASSERT_EQUAL_INT(166, layout.pageDotsY);
+}
+
 void test_eta_columns_are_ordered_and_evenly_spread() {
     ArrivalsLayout layout = stickS3Layout();
 
@@ -98,6 +115,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_reproduces_the_original_stick_s3_layout);
     RUN_TEST(test_row_height_is_passed_through);
     RUN_TEST(test_a_taller_screen_fits_more_rows);
+    RUN_TEST(test_t_display_s3_layout_at_dejavu24);
     RUN_TEST(test_eta_columns_are_ordered_and_evenly_spread);
     RUN_TEST(test_header_is_centred_clear_of_the_battery);
     RUN_TEST(test_a_row_taller_than_the_screen_fits_nothing);

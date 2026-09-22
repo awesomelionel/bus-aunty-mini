@@ -11,6 +11,8 @@ constexpr BoardProfile kProfile = {
     // StickS3's rotation 1 comes out upside down here and 3 is the landscape
     // that puts the three buttons in a column beside the screen.
     /*rotation=*/3,
+    // Same panel size as the StickS3, so the same size rows fit.
+    /*arrivalsFontHeight=*/18,
     // Same levels as the StickS3 to start with, so the two boards look alike.
     /*brightnessFull=*/128,
     /*brightnessDim=*/16,
@@ -18,10 +20,15 @@ constexpr BoardProfile kProfile = {
     // button that way tells a user looking at the screen nothing. The three
     // sit in a column, so the middle one is identified by position instead.
     /*secondaryButtonLabel=*/"middle btn",
+    // "Middle" already locates it among three in a column, and no single
+    // direction would say that any better.
+    /*secondaryButtonArrow=*/ButtonArrow::None,
     // The MAX17048 reads the charger rail when no battery is attached and
     // reports a healthy charge, so an absent battery is indistinguishable
     // from a full one.
     /*detectsBatteryPresence=*/false,
+    // Same 135px ceiling as the StickS3.
+    /*supportsFramedTheme=*/false,
 };
 
 }  // namespace

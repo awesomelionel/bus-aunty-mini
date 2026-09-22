@@ -12,9 +12,11 @@ struct ConfigServerData {
     std::vector<WifiNetwork>* networks = nullptr;
     std::vector<BusStopConfig>* stops = nullptr;
     bool* alwaysOn = nullptr;
+    bool* win95Theme = nullptr;
     bool* networksDirty = nullptr;
     bool* stopsDirty = nullptr;
     bool* alwaysOnDirty = nullptr;
+    bool* win95ThemeDirty = nullptr;
 };
 
 void configServerBegin(const ConfigServerData& data);
