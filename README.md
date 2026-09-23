@@ -406,3 +406,7 @@ directory. Nothing board-specific belongs in `src/core/`, `src/net/`,
   in `docs/superpowers/plans/2026-09-02-bus-arrival-display.md` (the original
   firmware) and `docs/superpowers/plans/2026-09-09-multi-device-support.md`
   (the board layer and the Feather).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
