@@ -97,6 +97,11 @@ void collectScan() {
 void startConnect(const WifiNetwork& net, uint32_t nowMs) {
     currentSsid = net.ssid;
     WiFi.mode(WIFI_STA);
+    // A failed or still-settling attempt on the previous candidate can
+    // leave the driver mid-association; without this, begin() for the
+    // next SSID is silently ignored and every candidate after the first
+    // never actually gets tried.
+    WiFi.disconnect(/*wifioff=*/false, /*eraseap=*/false);
     if (net.password.empty()) {
         WiFi.begin(net.ssid.c_str());
     } else {
