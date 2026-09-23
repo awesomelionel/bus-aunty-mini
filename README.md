@@ -227,11 +227,15 @@ on the device so it scans immediately rather than waiting out a backoff.
 
 ## What's on screen
 
+<img src="docs/images/arrivals-plain.png" alt="Plain arrivals screen: black background, white header and service numbers, ETA times colour-coded green/orange/red by load" width="360">
+
 The arrivals screen shows a header of `<stop name or code> (<n>/<total>)`, a
 battery icon in the top-right, and one row per service: service number on the
 left, then its three arrival times right-aligned in three columns. Times are
 rendered as minutes from now — `Due` for anything at or before now, `Nm` up to
 an hour, `60+` beyond that, and `--` when the API gave no time for that slot.
+This screen does not change look between day and night — only the Windows 95
+screen below does.
 
 ### Windows 95 screen (T-Display-S3 only)
 
@@ -239,6 +243,11 @@ an hour, `60+` beyond that, and `--` when the API gave no time for that slot.
 instead: a title bar with the stop and its index, a column header naming the
 three times, a sunken list, and a status bar carrying the page indicator, the
 clock and the battery. Off by default.
+
+<p>
+<img src="docs/images/arrivals-win95-day.png" alt="Windows 95 arrivals screen, day palette: silver chrome, navy-to-blue title bar, white sunken list, a double-decker marker beside two of the times" width="360">
+<img src="docs/images/arrivals-win95-night.png" alt="Windows 95 arrivals screen, night palette: black chrome and list, yellow title text, brighter load colours" width="360">
+</p>
 
 The chrome costs 54px of the panel's 170 — title bar 18, column header 16,
 status bar 16, margins 4 — so four services show instead of five. That is the
