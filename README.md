@@ -145,6 +145,8 @@ cannot break unnoticed.
 
 ## First-time setup
 
+<img src="docs/images/setup-portal.png" alt="Setup portal page, served by the device's own access point: bus stop slots, then a WiFi network list with a nearby-network picker" width="360">
+
 1. Flash the firmware and power on the device.
 2. With no saved networks it opens a WPA2 access point named `BusAuntySetup`.
    The password is eight hex digits shown on the screen (derived from the
@@ -186,6 +188,8 @@ as #1 on first boot, so flashing this build does not send you back through
 setup.
 
 ## Configuring the device
+
+<img src="docs/images/config-page.png" alt="Config page on the LAN, with saved WiFi networks and their up/down/delete controls, and Display Options showing Always on and Windows 95 arrivals screen checked" width="360">
 
 After it is on your LAN, hold the config button — KEY2 on the StickS3, D1
 (the middle one) on the Feather, BOOT on the T-Display-S3 — for 3 seconds.
