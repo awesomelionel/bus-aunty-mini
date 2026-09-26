@@ -880,7 +880,11 @@ void displayShowArrivals(const std::string& stopLabel,
         header += stale;
     }
     
-    canvas.drawString(header.c_str(), layout.headerCenterX, 0);
+    // Truncate header to fit left of battery with 4px left margin
+    int maxHeaderWidth = screenWidth() - kHeaderRightPad - 4;
+    std::string truncatedHeader = truncateLabel(header, maxHeaderWidth, arrivalsFont());
+    
+    canvas.drawString(truncatedHeader.c_str(), layout.headerCenterX, 0);
 
     drawBattery(power);
     
