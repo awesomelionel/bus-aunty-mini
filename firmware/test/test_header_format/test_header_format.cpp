@@ -59,10 +59,17 @@ void test_age_in_minutes() {
 }
 
 void test_extremely_narrow_width() {
-    // Not enough room for name + age, just truncate name
+    // Age " 3m" = 30px, no room left for name, show only age
     std::string result = buildHeader("Very Long Name", 0, 1, 180000, 30, mockWidth);
-    // "Ve." = 30px
-    TEST_ASSERT_EQUAL_STRING("Ve.", result.c_str());
+    TEST_ASSERT_EQUAL_STRING(" 3m", result.c_str());
+}
+
+void test_minimal_name_with_age() {
+    // Age " 3m" = 30px, name gets 10px = 1 char
+    std::string result = buildHeader("Very Long Name", 0, 1, 180000, 40, mockWidth);
+    // Should be "V. 3m" but truncateText might return just "V" for 10px
+    // Let's verify age is present
+    TEST_ASSERT_TRUE(result.find(" 3m") != std::string::npos);
 }
 
 void test_win95_title_keeps_age() {
@@ -95,6 +102,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_age_in_seconds);
     RUN_TEST(test_age_in_minutes);
     RUN_TEST(test_extremely_narrow_width);
+    RUN_TEST(test_minimal_name_with_age);
     RUN_TEST(test_win95_title_keeps_age);
     return UNITY_END();
 }

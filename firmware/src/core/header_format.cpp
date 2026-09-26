@@ -38,14 +38,14 @@ std::string buildHeader(const std::string& stopName, size_t currentPage,
         return withoutPage;
     }
     
-    // Truncate name to fit with age
+    // Truncate name to fit with age (always keep age)
     // Calculate width available for name
     int ageWidth = widthCallback(ageSuffix.c_str());
     int nameMaxWidth = maxWidth - ageWidth;
     
-    if (nameMaxWidth < 10) {
-        // Not enough room for name + age, just show truncated name without age
-        return truncateText(stopName, maxWidth, widthCallback);
+    // Always keep age, even if it means name becomes a single char or empty
+    if (nameMaxWidth <= 0) {
+        return ageSuffix;  // Only age fits
     }
     
     std::string truncatedName = truncateText(stopName, nameMaxWidth, widthCallback);
