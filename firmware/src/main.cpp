@@ -200,6 +200,12 @@ void renderCachedPage() {
         return;
     }
     
+    // If cache has no rows, show "no services"
+    if (cache.rows.empty()) {
+        displayShowStatus(cache.label + ": no services");
+        return;
+    }
+    
     // If data is past 10-minute threshold, show error instead of stale rows
     if (isDataStale(cache.fetchedAtMillis, millis())) {
         displayShowStatus("No recent data");
