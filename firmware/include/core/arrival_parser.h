@@ -75,6 +75,7 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
 // A stop can list more rows than fit on screen, so they are shown a page
 // at a time. Returns 0 pages when there is nothing to show.
 size_t servicePageCount(size_t serviceCount, size_t pageSize);
+size_t servicePageCount(const std::vector<BusServiceRow>& rows, size_t pageSize);
 std::vector<BusServiceRow> selectServicePage(
     const std::vector<BusServiceRow>& rows, size_t pageSize, size_t page);
 // Legacy overload for old tests

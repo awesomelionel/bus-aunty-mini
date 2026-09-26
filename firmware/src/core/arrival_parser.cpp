@@ -345,20 +345,127 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
 }
 
 size_t servicePageCount(size_t serviceCount, size_t pageSize) {
-    if (pageSize == 0) {
+    if (pageSize == 0 || serviceCount == 0) {
         return 0;
     }
+    // Simple calculation - actual pages may differ due to service grouping
+    // but this is used for initial estimates
     return (serviceCount + pageSize - 1) / pageSize;
+}
+
+size_t servicePageCount(const std::vector<BusServiceRow>& rows, size_t pageSize) {
+    if (pageSize == 0 || rows.empty()) {
+        return 0;
+    }
+    
+    // Simulate paging with service grouping to get accurate page count
+    size_t pageCount = 0;
+    size_t currentPageSize = 0;
+    
+    for (size_t i = 0; i < rows.size(); ) {
+        const std::string& serviceNo = rows[i].serviceNo;
+        
+        // Count consecutive rows with same serviceNo
+        size_t serviceRowCount = 1;
+        while (i + serviceRowCount < rows.size() && 
+               rows[i + serviceRowCount].serviceNo == serviceNo) {
+            ++serviceRowCount;
+        }
+        
+        // If service rows fit on current page, add them
+        if (currentPageSize + serviceRowCount <= pageSize) {
+            currentPageSize += serviceRowCount;
+            i += serviceRowCount;
+        }
+        // If service rows would straddle boundary but fit on next page
+        else if (currentPageSize > 0 && serviceRowCount <= pageSize) {
+            // Start new page with this service
+            ++pageCount;
+            currentPageSize = serviceRowCount;
+            i += serviceRowCount;
+        }
+        // Service is too large for one page, split it
+        else {
+            // Fill current page as much as possible
+            while (currentPageSize < pageSize && i < rows.size()) {
+                ++currentPageSize;
+                ++i;
+            }
+            ++pageCount;
+            currentPageSize = 0;
+        }
+    }
+    
+    // Add final page if non-empty
+    if (currentPageSize > 0) {
+        ++pageCount;
+    }
+    
+    return pageCount;
 }
 
 std::vector<BusServiceRow> selectServicePage(
     const std::vector<BusServiceRow>& rows, size_t pageSize, size_t page) {
     std::vector<BusServiceRow> selected;
-    size_t start = page * pageSize;
-    for (size_t i = start; i < rows.size() && i < start + pageSize; ++i) {
-        selected.push_back(rows[i]);
+    
+    if (pageSize == 0 || rows.empty()) {
+        return selected;
     }
-    return selected;
+    
+    // Build pages respecting service boundaries
+    std::vector<std::vector<BusServiceRow>> pages;
+    std::vector<BusServiceRow> currentPage;
+    
+    for (size_t i = 0; i < rows.size(); ) {
+        const std::string& serviceNo = rows[i].serviceNo;
+        
+        // Count consecutive rows with same serviceNo
+        size_t serviceRowCount = 1;
+        while (i + serviceRowCount < rows.size() && 
+               rows[i + serviceRowCount].serviceNo == serviceNo) {
+            ++serviceRowCount;
+        }
+        
+        // If service rows fit on current page, add them
+        if (currentPage.size() + serviceRowCount <= pageSize) {
+            for (size_t j = 0; j < serviceRowCount; ++j) {
+                currentPage.push_back(rows[i + j]);
+            }
+            i += serviceRowCount;
+        }
+        // If service rows would straddle boundary but fit on next page
+        else if (!currentPage.empty() && serviceRowCount <= pageSize) {
+            // Push current page and start new one with this service
+            pages.push_back(currentPage);
+            currentPage.clear();
+            for (size_t j = 0; j < serviceRowCount; ++j) {
+                currentPage.push_back(rows[i + j]);
+            }
+            i += serviceRowCount;
+        }
+        // Service is too large for one page, split it
+        else {
+            // Fill current page as much as possible
+            while (currentPage.size() < pageSize && i < rows.size()) {
+                currentPage.push_back(rows[i++]);
+            }
+            if (!currentPage.empty()) {
+                pages.push_back(currentPage);
+                currentPage.clear();
+            }
+        }
+    }
+    
+    // Add final page if non-empty
+    if (!currentPage.empty()) {
+        pages.push_back(currentPage);
+    }
+    
+    // Return requested page
+    if (page < pages.size()) {
+        return pages[page];
+    }
+    return selected;  // Empty if page out of range
 }
 
 std::vector<BusService> selectServicePage(

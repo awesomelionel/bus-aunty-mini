@@ -208,7 +208,7 @@ void renderCachedPage() {
     
     bool hasLabels = cachedRowsHaveLabels(cache.rows);
     size_t totalPages =
-        servicePageCount(cache.rows.size(), servicesPerScreen(hasLabels));
+        servicePageCount(cache.rows, servicesPerScreen(hasLabels));
     std::vector<BusServiceRow> page =
         selectServicePage(cache.rows, servicesPerScreen(hasLabels), currentPage);
     
@@ -312,7 +312,7 @@ void pollAndRender() {
     
     bool hasLabels = cachedRowsHaveLabels(cache.rows);
     if (currentPage >=
-        servicePageCount(cache.rows.size(), servicesPerScreen(hasLabels))) {
+        servicePageCount(cache.rows, servicesPerScreen(hasLabels))) {
         currentPage = 0;
     }
     renderCachedPage();
@@ -334,7 +334,7 @@ void stepForward() {
     
     bool hasLabels = cachedRowsHaveLabels(cache.rows);
     size_t totalPages =
-        servicePageCount(cache.rows.size(), servicesPerScreen(hasLabels));
+        servicePageCount(cache.rows, servicesPerScreen(hasLabels));
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();

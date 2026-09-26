@@ -616,6 +616,60 @@ void test_service_with_no_arrivals_across_multiple_entries() {
     TEST_ASSERT_EQUAL_INT64(-1, result.rows[0].arrivals[0].etaEpoch);
 }
 
+void test_paging_avoids_straddling_multirow_services() {
+    // Service 111 has 2 rows, service 222 has 1 row, service 333 has 2 rows
+    // With pageSize=3, naive paging would put 111(2) + 222(1) on page 0, 333(2) on page 1
+    // But 333's 2 rows would straddle if we only fit 1 on page 0
+    // Smart paging should put 111(2) + 222(1) on page 0, 333(2) on page 1
+    
+    std::vector<BusServiceRow> rows;
+    
+    // Service 111 with 2 rows (different destinations)
+    BusServiceRow row1;
+    row1.serviceNo = "111";
+    row1.label = "North";
+    rows.push_back(row1);
+    
+    BusServiceRow row2;
+    row2.serviceNo = "111";
+    row2.label = "South";
+    rows.push_back(row2);
+    
+    // Service 222 with 1 row
+    BusServiceRow row3;
+    row3.serviceNo = "222";
+    row3.label = "";
+    rows.push_back(row3);
+    
+    // Service 333 with 2 rows (different destinations)
+    BusServiceRow row4;
+    row4.serviceNo = "333";
+    row4.label = "East";
+    rows.push_back(row4);
+    
+    BusServiceRow row5;
+    row5.serviceNo = "333";
+    row5.label = "West";
+    rows.push_back(row5);
+    
+    // With pageSize=3, we should get 2 pages
+    size_t pageCount = servicePageCount(rows, 3);
+    TEST_ASSERT_EQUAL(2, pageCount);
+    
+    // Page 0: 111(2) + 222(1) = 3 rows
+    std::vector<BusServiceRow> page0 = selectServicePage(rows, 3, 0);
+    TEST_ASSERT_EQUAL(3, page0.size());
+    TEST_ASSERT_EQUAL_STRING("111", page0[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("111", page0[1].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("222", page0[2].serviceNo.c_str());
+    
+    // Page 1: 333(2) = 2 rows (not straddled)
+    std::vector<BusServiceRow> page1 = selectServicePage(rows, 3, 1);
+    TEST_ASSERT_EQUAL(2, page1.size());
+    TEST_ASSERT_EQUAL_STRING("333", page1[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("333", page1[1].serviceNo.c_str());
+}
+
 void setup() {}
 void loop() {}
 
@@ -658,5 +712,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_labels_shown_for_loops_even_with_one_label);
     RUN_TEST(test_service_with_no_arrivals_kept_as_row);
     RUN_TEST(test_service_with_no_arrivals_across_multiple_entries);
+    RUN_TEST(test_paging_avoids_straddling_multirow_services);
     return UNITY_END();
 }
