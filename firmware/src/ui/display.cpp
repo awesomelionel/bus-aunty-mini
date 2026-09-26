@@ -559,10 +559,12 @@ void drawFramedArrivals(const std::string& stopLabel,
             canvas.drawString(truncated.c_str(), labelX, labelY);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals
+            // Add "2nd" marker for second-visit arrivals in dim color
             if (hasVisit2) {
                 int markerX = labelX + canvas.textWidth(truncated.c_str());
+                canvas.setTextColor(p.dim);
                 canvas.drawString(" 2nd", markerX, labelY);
+                canvas.setTextColor(p.ink);  // Restore color
             }
 #endif
         }
@@ -890,8 +892,20 @@ void displayShowArrivals(const std::string& stopLabel,
         if (!row.label.empty()) {
             const int labelX = layout.serviceColX;
             const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
-            const int maxLabelWidth = board().screenWidth - labelX - 
-                                      (board().arrivalsFontHeight >= 24 ? 8 : 8);
+            int maxLabelWidth = board().screenWidth - labelX - 
+                               (board().arrivalsFontHeight >= 24 ? 8 : 8);
+            
+            // On last row of multi-page stop, cap width to avoid collision with page dots
+            if (totalPages > 1 && i == rows.size() - 1) {
+                // Page dots centered at screenWidth/2, with kDotSpacing=8, kDotRadius=2
+                // Leftmost dot starts at: screenWidth/2 - (totalPages-1)*4 - 2
+                int dotsLeftEdge = screenWidth() / 2 - 
+                                  static_cast<int>(totalPages - 1) * 4 - 2 - 4; // 4px clearance
+                int availableWidth = dotsLeftEdge - labelX;
+                if (availableWidth < maxLabelWidth) {
+                    maxLabelWidth = availableWidth;
+                }
+            }
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
             // Check if this row has any visit-2 arrivals to determine marker reservation
@@ -911,10 +925,12 @@ void displayShowArrivals(const std::string& stopLabel,
             canvas.drawString(truncated.c_str(), labelX, labelY);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals
+            // Add "2nd" marker for second-visit arrivals in grey to distinguish from label
             if (hasVisit2) {
                 int markerX = labelX + canvas.textWidth(truncated.c_str());
+                canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
                 canvas.drawString(" 2nd", markerX, labelY);
+                canvas.setTextColor(TFT_WHITE, TFT_BLACK);  // Restore color
             }
 #endif
         }
