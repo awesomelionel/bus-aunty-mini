@@ -4,6 +4,7 @@
 
 struct FetchResult {
     bool ok = false;
+    bool parseError = false;
     int httpStatus = 0;
     std::string body;
 };

@@ -4,10 +4,13 @@
 #include <cstdio>
 #include <vector>
 
+#include "config.h"
 #include "board/board.h"
 #include "core/eta_format.h"
+#include "core/header_format.h"
 #include "core/layout.h"
 #include "core/night_window.h"
+#include "core/text_utils.h"
 #include "hal/display_device.h"
 #include "ui/wifi_image.h"
 
@@ -19,9 +22,10 @@ namespace {
 // hal::gfx() touches the hardware, so binding at static-init is safe.
 hal::Canvas canvas(&hal::gfx());
 
-// Measured once in displaySetup(), because the row height it is derived from
-// needs the arrivals font, and a font needs a live device.
-ArrivalsLayout arrivalsLayout;
+// Two layouts: single-line for stops with no labels, two-line for stops with labels.
+// Computed once in displaySetup(), selected at render time based on current data.
+ArrivalsLayout arrivalsLayoutSingleLine;
+ArrivalsLayout arrivalsLayoutTwoLine;
 
 int screenWidth() { return board().screenWidth; }
 int screenHeight() { return board().screenHeight; }
@@ -33,6 +37,40 @@ int screenHeight() { return board().screenHeight; }
 const lgfx::GFXfont* arrivalsFont() {
     return board().arrivalsFontHeight >= 24 ? &fonts::DejaVu24
                                             : &fonts::DejaVu18;
+}
+
+// Label font: DejaVu9 for small boards, DejaVu12 for larger boards.
+const lgfx::GFXfont* labelFont() {
+    return board().arrivalsFontHeight >= 24 ? &fonts::DejaVu12
+                                            : &fonts::DejaVu9;
+}
+
+// Wrapper for truncateText that handles font setup and visit marker reservation.
+// When BUS_AUNTY_SHOW_VISIT_MARKER is enabled and reserveMarkerWidth is true,
+// reserves space for " 2nd" marker.
+std::string truncateLabel(const std::string& text, int maxWidth,
+                          const lgfx::GFXfont* font, bool reserveMarkerWidth = false) {
+    if (text.empty()) {
+        return text;
+    }
+    
+    canvas.setFont(font);
+    
+    // Reserve space for " 2nd" marker when flag is enabled and reserveMarkerWidth is true
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+    if (reserveMarkerWidth) {
+        int markerWidth = canvas.textWidth(" 2nd");
+        maxWidth -= markerWidth;
+        if (maxWidth < 10) {  // Sanity check
+            return ".";
+        }
+    }
+#endif
+    
+    // Use core truncation with canvas width callback
+    return truncateText(text, maxWidth, [](const char* s) {
+        return canvas.textWidth(s);
+    });
 }
 
 // A solid triangle of `size` pixels across, centred on the point given. This
@@ -288,16 +326,25 @@ constexpr int kWifiIconInkHeight = 68;
 constexpr float kWifiIconScale = 0.25f;
 constexpr int kWifiIconTextGap = 12;
 
+constexpr int kBatteryBodyWidth = 20;
+constexpr int kBatteryHeight = 11;
+constexpr int kBatteryTipWidth = 2;
+constexpr int kBatteryTipHeight = 5;
+constexpr int kBatteryRightMargin = 2;
+constexpr int kBatteryY = 2;
+constexpr int kBatteryLowPercent = 20;
+
 // The service rows and the header end a few pixels short of the bottom edge,
 // leaving room for an indicator that shows which page of a long service list
 // is on screen.
-void drawPageDots(size_t currentPage, size_t totalPages) {
+void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY) {
     constexpr int kDotRadius = 2;
     constexpr int kDotSpacing = 8;
 
-    int y = arrivalsLayout.pageDotsY;
-    int x = screenWidth() / 2 -
-            (static_cast<int>(totalPages - 1) * kDotSpacing) / 2;
+    int y = pageDotsY;
+    // Position dots in free space to the left of battery
+    int x = screenWidth() - kBatteryBodyWidth - kBatteryTipWidth - 
+            kBatteryRightMargin - 4 - static_cast<int>(totalPages) * kDotSpacing;
     for (size_t i = 0; i < totalPages; ++i) {
         if (i == currentPage) {
             canvas.fillCircle(x, y, kDotRadius, TFT_WHITE);
@@ -308,13 +355,6 @@ void drawPageDots(size_t currentPage, size_t totalPages) {
     }
 }
 
-constexpr int kBatteryBodyWidth = 20;
-constexpr int kBatteryHeight = 11;
-constexpr int kBatteryTipWidth = 2;
-constexpr int kBatteryTipHeight = 5;
-constexpr int kBatteryRightMargin = 2;
-constexpr int kBatteryY = 2;
-constexpr int kBatteryLowPercent = 20;
 // The header is centred in what the battery icon leaves free, so a long stop
 // name cannot run underneath it.
 constexpr int kHeaderRightPad =
@@ -389,10 +429,22 @@ void drawStatusBattery(int right, int centerY, const hal::PowerStatus& power,
 // than the shared ArrivalsLayout, which only supplies the row pitch and the
 // ETA columns.
 void drawFramedArrivals(const std::string& stopLabel,
-                        const std::vector<BusService>& services,
+                        const std::vector<BusServiceRow>& rows,
                         int64_t nowEpoch, size_t currentStopIndex,
                         size_t totalStops, size_t currentPage,
-                        size_t totalPages, const hal::PowerStatus& power) {
+                        size_t totalPages, const hal::PowerStatus& power,
+                        uint32_t dataAgeMs) {
+    // Check if any row has a label, then select the appropriate layout
+    bool hasLabels = false;
+    for (const BusServiceRow& row : rows) {
+        if (!row.label.empty()) {
+            hasLabels = true;
+            break;
+        }
+    }
+    
+    const ArrivalsLayout& layout = hasLabels ? arrivalsLayoutTwoLine : arrivalsLayoutSingleLine;
+    
     const Palette& p = paletteFor(nowEpoch);
     const int w = screenWidth();
     const int h = screenHeight();
@@ -408,10 +460,17 @@ void drawFramedArrivals(const std::string& stopLabel,
     canvas.setFont(&fonts::DejaVu12);
     canvas.setTextDatum(top_left);
     canvas.setTextColor(p.capInk);
-    const std::string title = stopLabel + "  " +
-                              std::to_string(currentStopIndex + 1) + " of " +
-                              std::to_string(totalStops);
-    drawBoldString(title.c_str(), 4, 3, /*growLeft=*/false);
+    
+    // Build title with intelligent truncation using core buildHeader
+    // Reserve space for bold (+1px) and end before first button (x=276)
+    constexpr int kTitleStartX = 4;
+    constexpr int kTitleMaxWidth = 268;  // 276 - 4 - bold margin, keeps age
+    
+    std::string title = buildHeader(stopLabel, currentStopIndex, totalStops,
+                                   dataAgeMs, kTitleMaxWidth,
+                                   [](const char* s) { return canvas.textWidth(s); });
+    
+    drawBoldString(title.c_str(), kTitleStartX, 3, /*growLeft=*/false);
 
     // Window buttons, right to left, so they stay put as the title grows.
     int bx = w - 3 - 13;
@@ -432,11 +491,11 @@ void drawFramedArrivals(const std::string& stopLabel,
     canvas.fillRect(0, hdrY, w, kColumnHeaderHeight, p.chrome);
     drawBevel(0, hdrY, w, kColumnHeaderHeight, p.hi, p.lo);
     canvas.setTextColor(p.ink);
-    canvas.drawString("Service", arrivalsLayout.serviceColX + 2, hdrY + 3);
+    canvas.drawString("Service", layout.serviceColX + 2, hdrY + 3);
     const char* colNames[] = {"Next", "Then", "Then"};
     canvas.setTextDatum(top_right);
     for (size_t c = 0; c < kArrivalsPerService; ++c) {
-        canvas.drawString(colNames[c], arrivalsLayout.etaColRightX[c],
+        canvas.drawString(colNames[c], layout.etaColRightX[c],
                           hdrY + 3);
     }
 
@@ -447,20 +506,52 @@ void drawFramedArrivals(const std::string& stopLabel,
     drawBevel(0, listY, w, listH, p.lo, p.hi);
 
     canvas.setFont(arrivalsFont());
-    const int rowHeight = arrivalsLayout.rowHeight;
+    const int rowHeight = layout.rowHeight;
     for (size_t i = 0;
-         i < services.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
+         i < rows.size() && i < layout.servicesPerScreen; ++i) {
         const int y = listY + kListMargin + static_cast<int>(i) * rowHeight;
-        const BusService& svc = services[i];
+        const BusServiceRow& row = rows[i];
 
+        canvas.setFont(arrivalsFont());
         canvas.setTextColor(p.ink);
         canvas.setTextDatum(top_left);
-        drawBoldString(svc.serviceNo.c_str(), arrivalsLayout.serviceColX + 2,
+        drawBoldString(row.serviceNo.c_str(), layout.serviceColX + 2,
                        y, /*growLeft=*/false);
 
+        // Draw label below service number if present (Win95 theme)
+        if (!row.label.empty()) {
+            const int labelX = layout.serviceColX + 2;
+            const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
+            const int maxLabelWidth = screenWidth() - labelX - 8;
+            
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+            bool hasVisit2 = shouldShowVisit2Marker(row);
+#else
+            bool hasVisit2 = false;
+#endif
+            
+            canvas.setFont(labelFont());
+            std::string truncated = truncateLabel(row.label, maxLabelWidth, labelFont(), hasVisit2);
+            canvas.setTextColor(p.ink);
+            canvas.drawString(truncated.c_str(), labelX, labelY);
+            
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+            // Add "2nd" marker for second-visit arrivals
+            // Navy for day palette, cyan for night (higher contrast)
+            if (hasVisit2) {
+                int markerX = labelX + canvas.textWidth(truncated.c_str());
+                uint32_t markerColor = (p.capA == 0x000080) ? 0x000080 : 0x00FFFF;
+                canvas.setTextColor(markerColor);
+                canvas.drawString(" 2nd", markerX, labelY);
+                canvas.setTextColor(p.ink);  // Restore color
+            }
+#endif
+        }
+
+        canvas.setFont(arrivalsFont());
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
-            const BusArrival& arrival = svc.arrivals[col];
+            const BusArrival& arrival = row.arrivals[col];
             const std::string eta = formatEtaMinutes(arrival.etaEpoch,
                                                      nowEpoch);
             uint32_t tint = p.dim;
@@ -471,7 +562,7 @@ void drawFramedArrivals(const std::string& stopLabel,
                 case BusLoad::Unknown: tint = p.ink; break;
             }
             canvas.setTextColor(tint);
-            drawBoldString(eta.c_str(), arrivalsLayout.etaColRightX[col], y,
+            drawBoldString(eta.c_str(), layout.etaColRightX[col], y,
                            /*growLeft=*/true);
             if (eta == kEtaArrivingLabel) {
                 // One pass more than the rest of the row. An arriving bus was
@@ -479,7 +570,7 @@ void drawFramedArrivals(const std::string& stopLabel,
                 // everything is bold it needs the extra to keep saying
                 // anything, and colour is already spoken for by load.
                 canvas.drawString(eta.c_str(),
-                                  arrivalsLayout.etaColRightX[col] - 2, y);
+                                  layout.etaColRightX[col] - 2, y);
             }
 
             // Sits to the left of the time it belongs to, measured rather
@@ -490,7 +581,7 @@ void drawFramedArrivals(const std::string& stopLabel,
                 // closes up against a glyph only six pixels wide.
                 const int textWidth = canvas.textWidth(eta.c_str()) + 1;
                 drawDoubleDeckMarker(
-                    arrivalsLayout.etaColRightX[col] - textWidth -
+                    layout.etaColRightX[col] - textWidth -
                         kDeckMarkerGap,
                     y + (rowHeight - kDeckMarkerHeight) / 2, tint);
             }
@@ -556,17 +647,21 @@ void displaySetTheme(bool win95) {
     canvas.setFont(arrivalsFont());
     const int rowHeight = canvas.fontHeight();
 
+    // Compute both single-line (no labels) and two-line (with labels) layouts
     if (win95Theme) {
         const int listHeight = screenHeight() - kFramedChromeHeight;
         // computeArrivalsLayout reserves its first row for a header that the
         // framed screen draws as chrome instead, so it is handed one row more
         // than the list really has and hands the right count back.
-        arrivalsLayout = computeArrivalsLayout(screenWidth(),
-                                               listHeight + rowHeight,
-                                               rowHeight, /*battery=*/0);
+        arrivalsLayoutSingleLine = computeArrivalsLayout(
+            screenWidth(), listHeight + rowHeight, rowHeight, /*battery=*/0, false);
+        arrivalsLayoutTwoLine = computeArrivalsLayout(
+            screenWidth(), listHeight + rowHeight, rowHeight, /*battery=*/0, true);
     } else {
-        arrivalsLayout = computeArrivalsLayout(screenWidth(), screenHeight(),
-                                               rowHeight, kHeaderRightPad);
+        arrivalsLayoutSingleLine = computeArrivalsLayout(
+            screenWidth(), screenHeight(), rowHeight, kHeaderRightPad, false);
+        arrivalsLayoutTwoLine = computeArrivalsLayout(
+            screenWidth(), screenHeight(), rowHeight, kHeaderRightPad, true);
     }
 
     canvas.setTextFont(kDefaultTextFont);
@@ -574,7 +669,10 @@ void displaySetTheme(bool win95) {
 
 bool displayThemeIsWin95() { return win95Theme; }
 
-size_t servicesPerScreen() { return arrivalsLayout.servicesPerScreen; }
+size_t servicesPerScreen(bool hasLabels) {
+    return hasLabels ? arrivalsLayoutTwoLine.servicesPerScreen
+                     : arrivalsLayoutSingleLine.servicesPerScreen;
+}
 
 void displaySetDimmed(bool dimmed) {
     hal::displayDeviceSetBrightness(dimmed ? board().brightnessDim
@@ -719,13 +817,14 @@ void displayShowNoStops() {
 }
 
 void displayShowArrivals(const std::string& stopLabel,
-                          const std::vector<BusService>& services,
+                          const std::vector<BusServiceRow>& rows,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
-                          size_t totalPages, const hal::PowerStatus& power) {
+                          size_t totalPages, const hal::PowerStatus& power,
+                          uint32_t dataAgeMs) {
     if (win95Theme) {
-        drawFramedArrivals(stopLabel, services, nowEpoch, currentStopIndex,
-                           totalStops, currentPage, totalPages, power);
+        drawFramedArrivals(stopLabel, rows, nowEpoch, currentStopIndex,
+                           totalStops, currentPage, totalPages, power, dataAgeMs);
         return;
     }
 
@@ -733,36 +832,80 @@ void displayShowArrivals(const std::string& stopLabel,
     canvas.setFont(arrivalsFont());
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
-    // The header takes the first row, leaving the layout's row count below it.
-    const int rowHeight = arrivalsLayout.rowHeight;
+    // Check if any row has a label, then select the appropriate layout
+    bool hasLabels = false;
+    for (const BusServiceRow& row : rows) {
+        if (!row.label.empty()) {
+            hasLabels = true;
+            break;
+        }
+    }
+    
+    const ArrivalsLayout& layout = hasLabels ? arrivalsLayoutTwoLine : arrivalsLayoutSingleLine;
+    const int rowHeight = layout.rowHeight;
 
     canvas.setTextDatum(top_center);
-    std::string header = stopLabel + " (" +
-                          std::to_string(currentStopIndex + 1) + "/" +
-                          std::to_string(totalStops) + ")";
-    canvas.drawString(header.c_str(), arrivalsLayout.headerCenterX, 0);
+    canvas.setFont(arrivalsFont());
+    
+    // Build header with intelligent truncation
+    int maxHeaderWidth = screenWidth() - kHeaderRightPad - 4;
+    std::string header = buildHeader(stopLabel, currentStopIndex, totalStops,
+                                    dataAgeMs, maxHeaderWidth,
+                                    [](const char* s) { return canvas.textWidth(s); });
+    
+    canvas.drawString(header.c_str(), layout.headerCenterX, 0);
 
     drawBattery(power);
-
+    
     for (size_t i = 0;
-         i < services.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
+         i < rows.size() && i < layout.servicesPerScreen; ++i) {
         int y = rowHeight + static_cast<int>(i) * rowHeight;
-        const BusService& svc = services[i];
+        const BusServiceRow& row = rows[i];
 
+        canvas.setFont(arrivalsFont());
         canvas.setTextColor(TFT_WHITE, TFT_BLACK);
         canvas.setTextDatum(top_left);
-        canvas.drawString(svc.serviceNo.c_str(), arrivalsLayout.serviceColX, y);
+        canvas.drawString(row.serviceNo.c_str(), layout.serviceColX, y);
 
+        // Draw label below service number if present
+        if (!row.label.empty()) {
+            const int labelX = layout.serviceColX;
+            const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
+            const int maxLabelWidth = board().screenWidth - labelX - 
+                                      (board().arrivalsFontHeight >= 24 ? 8 : 8);
+            
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+            bool hasVisit2 = shouldShowVisit2Marker(row);
+#else
+            bool hasVisit2 = false;
+#endif
+            
+            canvas.setFont(labelFont());
+            std::string truncated = truncateLabel(row.label, maxLabelWidth, labelFont(), hasVisit2);
+            canvas.drawString(truncated.c_str(), labelX, labelY);
+            
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+            // Add "2nd" marker for second-visit arrivals in cyan to distinguish from label
+            if (hasVisit2) {
+                int markerX = labelX + canvas.textWidth(truncated.c_str());
+                canvas.setTextColor(TFT_CYAN, TFT_BLACK);
+                canvas.drawString(" 2nd", markerX, labelY);
+                canvas.setTextColor(TFT_WHITE, TFT_BLACK);  // Restore color
+            }
+#endif
+        }
+
+        canvas.setFont(arrivalsFont());
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
-            const BusArrival& arrival = svc.arrivals[col];
+            const BusArrival& arrival = row.arrivals[col];
             std::string eta = formatEtaMinutes(arrival.etaEpoch, nowEpoch);
 
             // Single argument leaves the text background transparent, which
             // the second pass below depends on. Safe because every frame
             // starts from a cleared sprite.
             canvas.setTextColor(loadColor(arrival.load));
-            canvas.drawString(eta.c_str(), arrivalsLayout.etaColRightX[col], y);
+            canvas.drawString(eta.c_str(), layout.etaColRightX[col], y);
 
             // Colour is spoken for by load, so an arriving bus is emphasised
             // by weight: overdrawing a pixel to the left thickens the stems.
@@ -770,13 +913,15 @@ void displayShowArrivals(const std::string& stopLabel,
             // where the spare room is.
             if (eta == kEtaArrivingLabel) {
                 canvas.drawString(eta.c_str(),
-                                  arrivalsLayout.etaColRightX[col] - 1, y);
+                                  layout.etaColRightX[col] - 1, y);
             }
         }
     }
 
     if (totalPages > 1) {
-        drawPageDots(currentPage, totalPages);
+        // Draw page dots in header area, to the left of battery
+        const int dotsY = kBatteryY + kBatteryHeight / 2;
+        drawPageDots(currentPage, totalPages, dotsY);
     }
 
     canvas.pushSprite(0, 0);

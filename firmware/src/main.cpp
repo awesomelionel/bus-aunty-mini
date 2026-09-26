@@ -4,10 +4,12 @@
 #include <esp_system.h>
 #include <time.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
 #include "core/arrival_parser.h"
+#include "core/backoff_scheduler.h"
 #include "core/bus_stop_config.h"
 #include "core/night_window.h"
 #include "core/sleep_policy.h"
@@ -25,7 +27,6 @@
 
 namespace {
 
-constexpr uint32_t kPollIntervalMs = 30000;
 constexpr uint32_t kPortalHoldMs = 3000;
 constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
@@ -48,8 +49,9 @@ bool stopsDirty = false;
 bool alwaysOnDirty = false;
 bool win95ThemeDirty = false;
 size_t currentStopIndex = 0;
-uint32_t lastPollMillis = 0;
+BackoffState backoffState;
 bool needsImmediateFetch = true;
+uint32_t lastDisplayRefreshMs = 0;
 bool noStopsRendered = false;
 bool offlineRendered = false;
 bool connectingRendered = false;
@@ -61,8 +63,16 @@ uint32_t lastInteractionMillis = 0;
 uint32_t ignoreSleepClickUntilMs = 0;
 PowerMode powerMode = PowerMode::Awake;
 
-std::vector<BusService> cachedServices;
-std::string cachedLabel;
+// Per-stop cache: stores rows and fetch time for each configured stop
+struct StopCache {
+    std::string stopCode;
+    std::vector<BusServiceRow> rows;
+    std::string label;
+    uint32_t fetchedAtMillis = 0;
+    bool valid = false;
+};
+std::array<StopCache, kMaxBusStops> stopCaches;
+
 size_t currentPage = 0;
 
 void noteInteraction() { lastInteractionMillis = millis(); }
@@ -99,6 +109,14 @@ void persistDirtySettings() {
     if (stopsDirty) {
         saveBusStops(busStops);
         stopsDirty = false;
+        // Clear all caches when stops change
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+            cache.stopCode.clear();
+        }
+        currentPage = 0;
+        needsImmediateFetch = wifiLinkConnected();
     }
     if (alwaysOnDirty) {
         saveAlwaysOn(alwaysOn);
@@ -113,7 +131,11 @@ void persistDirtySettings() {
         // the old five-row screen can point past the end of a four-row one.
         displaySetTheme(win95Theme);
         currentPage = 0;
-        cachedServices.clear();
+        // Invalidate all stop caches
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+        }
         needsImmediateFetch = wifiLinkConnected();
     }
     if (networksDirty) {
@@ -153,55 +175,172 @@ void syncTime() {
     timeSynced = now >= 1700000000;
 }
 
+bool cachedRowsHaveLabels(const std::vector<BusServiceRow>& rows) {
+    for (const BusServiceRow& row : rows) {
+        if (!row.label.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void renderCachedPage() {
+    if (currentStopIndex >= kMaxBusStops || currentStopIndex >= busStops.size()) {
+        return;
+    }
+    
+    StopCache& cache = stopCaches[currentStopIndex];
+    if (!cache.valid) {
+        return;
+    }
+    
+    // Verify cache stopCode matches current stop
+    if (cache.stopCode != busStops[currentStopIndex].code) {
+        cache.valid = false;
+        return;
+    }
+    
+    // If cache has no rows, show "no services"
+    if (cache.rows.empty()) {
+        displayShowStatus(cache.label + ": no services");
+        return;
+    }
+    
+    // If data is past 10-minute threshold, show error instead of stale rows
+    if (isDataStale(cache.fetchedAtMillis, millis())) {
+        displayShowStatus("No recent data");
+        return;
+    }
+    
+    bool hasLabels = cachedRowsHaveLabels(cache.rows);
     size_t totalPages =
-        servicePageCount(cachedServices.size(), servicesPerScreen());
-    std::vector<BusService> page =
-        selectServicePage(cachedServices, servicesPerScreen(), currentPage);
-    displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
+        servicePageCount(cache.rows, servicesPerScreen(hasLabels));
+    std::vector<BusServiceRow> page =
+        selectServicePage(cache.rows, servicesPerScreen(hasLabels), currentPage);
+    
+    // Calculate data age (wrap-safe: unsigned subtraction wraps correctly)
+    uint32_t ageMs = dataAgeMs(cache.fetchedAtMillis, millis());
+    
+    displayShowArrivals(cache.label, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
-                         hal::powerStatus());
+                         hal::powerStatus(), ageMs);
 }
 
 void pollAndRender() {
+    if (currentStopIndex >= busStops.size() || currentStopIndex >= kMaxBusStops) {
+        return;
+    }
+    
     const BusStopConfig& stop = busStops[currentStopIndex];
     const std::string& label = busStopLabel(stop);
-    displayShowStatus("Loading " + label + "...");
+    StopCache& cache = stopCaches[currentStopIndex];
+    
+    // Check if we have valid cache data < 10 minutes old
+    bool haveFreshCache = cache.valid && 
+                          !isDataStale(cache.fetchedAtMillis, millis());
+    
+    // Only show "Loading..." on first fetch or stop change
+    if (!cache.valid) {
+        displayShowStatus("Loading " + label + "...");
+    }
 
-    cachedServices.clear();
+    backoffState.lastAttemptMs = millis();
+    
     wifiLinkSetBusy(true);
     FetchResult fetch = fetchBusArrival(stop.code);
     wifiLinkSetBusy(false);
+    
+    // Handle errors with backoff
     if (!fetch.ok) {
-        displayShowStatus(fetch.httpStatus == 404
-                               ? "No data for " + label
-                               : std::string("Fetch failed (") +
-                                     std::to_string(fetch.httpStatus) + ")");
+        if (fetch.parseError) {
+            // JSON parse error - increment backoff, show "Bad data"
+            incrementBackoff(backoffState);
+            if (haveFreshCache) {
+                renderCachedPage();
+            } else {
+                displayShowStatus("Bad data");
+            }
+            return;
+        }
+        
+        if (fetch.httpStatus == 404) {
+            // 404 is not a backend error - clear cache, show "No data"
+            cache.valid = false;
+            cache.rows.clear();
+            displayShowStatus("No data for " + label);
+            resetBackoff(backoffState);
+            return;
+        }
+        
+        // Network error, timeout, or 5xx - increment backoff, keep cached data
+        incrementBackoff(backoffState);
+        // Fall back to stale cache if < 10 minutes old
+        if (haveFreshCache) {
+            renderCachedPage();
+        } else {
+            displayShowStatus(std::string("Fetch failed (") +
+                              std::to_string(fetch.httpStatus) + ")");
+        }
         return;
     }
 
     ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
     if (!parsed.valid) {
-        displayShowStatus("Bad response for " + label);
+        // Parse error in arrival_parser - increment backoff, fall back to cache
+        incrementBackoff(backoffState);
+        if (haveFreshCache) {
+            renderCachedPage();
+        } else {
+            displayShowStatus("Bad response for " + label);
+        }
         return;
     }
-    if (parsed.services.empty()) {
+    
+    if (parsed.rows.empty()) {
+        // Empty services is not an error state
+        cache.stopCode = stop.code;
+        cache.rows.clear();
+        cache.label = label;
+        cache.fetchedAtMillis = millis();
+        cache.valid = true;
         displayShowStatus(label + ": no services");
+        resetBackoff(backoffState);
         return;
     }
 
-    cachedServices = parsed.services;
-    cachedLabel = label;
+    // Success - update cache, reset backoff
+    cache.stopCode = stop.code;
+    cache.rows = parsed.rows;
+    cache.label = label;
+    cache.fetchedAtMillis = millis();
+    cache.valid = true;
+    resetBackoff(backoffState);
+    
+    bool hasLabels = cachedRowsHaveLabels(cache.rows);
     if (currentPage >=
-        servicePageCount(cachedServices.size(), servicesPerScreen())) {
+        servicePageCount(cache.rows, servicesPerScreen(hasLabels))) {
         currentPage = 0;
     }
     renderCachedPage();
 }
 
 void stepForward() {
+    if (currentStopIndex >= kMaxBusStops) {
+        return;
+    }
+    
+    StopCache& cache = stopCaches[currentStopIndex];
+    if (!cache.valid) {
+        // No cache yet, move to next stop
+        currentPage = 0;
+        currentStopIndex = (currentStopIndex + 1) % busStops.size();
+        needsImmediateFetch = true;
+        return;
+    }
+    
+    bool hasLabels = cachedRowsHaveLabels(cache.rows);
     size_t totalPages =
-        servicePageCount(cachedServices.size(), servicesPerScreen());
+        servicePageCount(cache.rows, servicesPerScreen(hasLabels));
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();
@@ -241,14 +380,17 @@ void enterSleep() {
 
     wifiLinkOnWake();
 
-    cachedServices.clear();
+    // Invalidate all stop caches after sleep
+    for (StopCache& cache : stopCaches) {
+        cache.valid = false;
+        cache.rows.clear();
+    }
     currentPage = 0;
     noStopsRendered = false;
     offlineRendered = false;
     connectingRendered = false;
     inConfigScreen = false;
     needsImmediateFetch = true;
-    lastPollMillis = millis();
     powerMode = PowerMode::Awake;
     noteInteraction();
     ignoreSleepClickUntilMs = millis() + kIgnoreSleepClickAfterWakeMs;
@@ -307,18 +449,15 @@ void onLinkState(WifiLinkState next) {
         if (!timeSynced) {
             syncTime();
         }
-        cachedServices.clear();
-        currentPage = 0;
+        // Don't clear caches - keep last-good data, let 10-minute rule decide
         noStopsRendered = false;
         offlineRendered = false;
         connectingRendered = false;
         needsImmediateFetch = true;
-        lastPollMillis = millis();
         noteInteraction();
     } else if (lastLinkState == WifiLinkState::Connected) {
         configServerStopMdns();
         timeSynced = false;
-        cachedServices.clear();
         offlineRendered = false;
     }
     if (next != WifiLinkState::ApFallback) {
@@ -490,9 +629,17 @@ void loop() {
     }
 
     uint32_t now = millis();
-    if (needsImmediateFetch || now - lastPollMillis >= kPollIntervalMs) {
+    
+    // Refresh display periodically to update ETAs and stale age
+    if (shouldRefreshDisplay(lastDisplayRefreshMs, now)) {
+        renderCachedPage();
+        lastDisplayRefreshMs = now;
+    }
+    
+    // Attempt fetch based on backoff schedule
+    if (needsImmediateFetch || shouldAttemptFetch(backoffState, now)) {
         pollAndRender();
-        lastPollMillis = now;
+        lastDisplayRefreshMs = now;
         needsImmediateFetch = false;
     }
 }
