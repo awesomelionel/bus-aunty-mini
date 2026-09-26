@@ -242,6 +242,17 @@ void pollAndRender() {
     
     // Handle errors with backoff
     if (!fetch.ok) {
+        if (fetch.parseError) {
+            // JSON parse error - increment backoff, show "Bad data"
+            incrementBackoff(backoffState);
+            if (haveFreshCache) {
+                renderCachedPage();
+            } else {
+                displayShowStatus("Bad data");
+            }
+            return;
+        }
+        
         if (fetch.httpStatus == 404) {
             // 404 is not a backend error - clear cache, show "No data"
             cache.valid = false;
@@ -265,7 +276,7 @@ void pollAndRender() {
 
     ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
     if (!parsed.valid) {
-        // Parse error - increment backoff, fall back to cache
+        // Parse error in arrival_parser - increment backoff, fall back to cache
         incrementBackoff(backoffState);
         if (haveFreshCache) {
             renderCachedPage();

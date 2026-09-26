@@ -17,6 +17,8 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
     Serial.printf("[heap] before fetch: free=%u max_alloc=%u\n", heapBefore, maxAllocBefore);
 #endif
 
+    bool heapLogged = false;
+    
     WiFiClientSecure client;
     client.setCACert(kGtsRootR4Pem);
 
@@ -27,6 +29,14 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
     std::string url =
         "https://api.busaunty.com/api/v2/BusArrival?BusStopCode=" + busStopCode;
     if (!http.begin(client, url.c_str())) {
+#ifdef ESP32
+        uint32_t heapAfter = ESP.getFreeHeap();
+        uint32_t maxAllocAfter = ESP.getMaxAllocHeap();
+        Serial.printf("[heap] after fetch: free=%u max_alloc=%u (delta: %d)\n", 
+                      heapAfter, maxAllocAfter, 
+                      static_cast<int32_t>(heapAfter) - static_cast<int32_t>(heapBefore));
+        heapLogged = true;
+#endif
         return result;
     }
 
@@ -60,25 +70,27 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
         DeserializationError err = deserializeJson(doc, *stream, DeserializationOption::Filter(filter));
         
         if (!err) {
-            // Serialize directly to result.body string
+            // Serialize directly to result.body string (parser expects JSON string)
             serializeJson(doc, result.body);
             result.ok = true;
         } else {
-            // JSON parse error - report as bad data, not fetch failure
+            // JSON parse error - set parseError flag
             result.ok = false;
-            result.body = "Bad data";
+            result.parseError = true;
         }
     }
 
     http.end();
 
 #ifdef ESP32
-    // Log heap after fetch
-    uint32_t heapAfter = ESP.getFreeHeap();
-    uint32_t maxAllocAfter = ESP.getMaxAllocHeap();
-    Serial.printf("[heap] after fetch: free=%u max_alloc=%u (delta: %d)\n", 
-                  heapAfter, maxAllocAfter, 
-                  static_cast<int32_t>(heapAfter) - static_cast<int32_t>(heapBefore));
+    if (!heapLogged) {
+        // Log heap after fetch
+        uint32_t heapAfter = ESP.getFreeHeap();
+        uint32_t maxAllocAfter = ESP.getMaxAllocHeap();
+        Serial.printf("[heap] after fetch: free=%u max_alloc=%u (delta: %d)\n", 
+                      heapAfter, maxAllocAfter, 
+                      static_cast<int32_t>(heapAfter) - static_cast<int32_t>(heapBefore));
+    }
 #endif
 
     return result;
