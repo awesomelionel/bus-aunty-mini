@@ -342,9 +342,9 @@ void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY) {
     constexpr int kDotSpacing = 8;
 
     int y = pageDotsY;
-    // Position dots to the right of battery, aligned right
-    int x = screenWidth() - kBatteryRightMargin - 
-            static_cast<int>(totalPages) * kDotSpacing;
+    // Position dots in free space to the left of battery
+    int x = screenWidth() - kBatteryBodyWidth - kBatteryTipWidth - 
+            kBatteryRightMargin - 4 - static_cast<int>(totalPages) * kDotSpacing;
     for (size_t i = 0; i < totalPages; ++i) {
         if (i == currentPage) {
             canvas.fillCircle(x, y, kDotRadius, TFT_WHITE);
@@ -945,7 +945,7 @@ void displayShowArrivals(const std::string& stopLabel,
     }
 
     if (totalPages > 1) {
-        // Draw page dots in header area, to the right of battery
+        // Draw page dots in header area, to the left of battery
         const int dotsY = kBatteryY + kBatteryHeight / 2;
         drawPageDots(currentPage, totalPages, dotsY);
     }
