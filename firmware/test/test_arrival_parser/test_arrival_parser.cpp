@@ -714,6 +714,35 @@ void test_paging_that_would_split_service() {
     TEST_ASSERT_EQUAL_STRING("222", page1[1].serviceNo.c_str());
 }
 
+void test_no_empty_row_for_service_with_mixed_entries() {
+    // Service 123 appears twice: once with no arrivals, once with arrivals
+    // Should NOT create a "--" row since service HAS arrivals in at least one entry
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [
+          {
+            "ServiceNo": "123",
+            "NextBus": {"EstimatedArrival": "", "Label": ""},
+            "NextBus2": {"EstimatedArrival": "", "Label": ""},
+            "NextBus3": {"EstimatedArrival": "", "Label": ""}
+          },
+          {
+            "ServiceNo": "123",
+            "NextBus": {"EstimatedArrival": "2024-01-15T10:30:00+08:00", "Label": "To North"},
+            "NextBus2": {"EstimatedArrival": "", "Label": ""},
+            "NextBus3": {"EstimatedArrival": "", "Label": ""}
+          }
+        ]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());  // Only one row, NOT two (no "--" row)
+    TEST_ASSERT_EQUAL_STRING("123", result.rows[0].serviceNo.c_str());
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[0].etaEpoch > 0);  // Has arrival
+}
+
 void test_should_show_visit2_marker() {
     BusServiceRow row;
     row.serviceNo = "125";
@@ -782,6 +811,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_service_with_no_arrivals_across_multiple_entries);
     RUN_TEST(test_paging_avoids_straddling_multirow_services);
     RUN_TEST(test_paging_that_would_split_service);
+    RUN_TEST(test_no_empty_row_for_service_with_mixed_entries);
     RUN_TEST(test_should_show_visit2_marker);
     return UNITY_END();
 }
