@@ -162,6 +162,7 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
     std::map<RowKey, RowData> rowData;
     std::vector<std::string> serviceOrder;  // Track service order from API
     std::map<std::string, size_t> serviceRowIndex;  // Track row index within service
+    std::set<std::string> servicesWithArrivals;  // Track which services have at least one arrival
     
     for (const BusService& svc : services) {
         // Track first-seen service order
@@ -170,13 +171,12 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
             serviceRowIndex[svc.serviceNo] = 0;
         }
         
-        bool hasAnyArrivals = false;
         for (size_t i = 0; i < kArrivalsPerService; ++i) {
             const BusArrival& arr = svc.arrivals[i];
             if (arr.etaEpoch < 0) {
                 continue;  // Skip empty slots
             }
-            hasAnyArrivals = true;
+            servicesWithArrivals.insert(svc.serviceNo);
             
             std::string label = stripToPrefix(svc.labels[i]);
             RowKey key{svc.serviceNo, label, svc.isLoop};
@@ -190,13 +190,15 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
             }
             rowData[key].arrivals.push_back(arr);
         }
-        
-        // If service has no arrivals, create an empty row
-        if (!hasAnyArrivals) {
-            RowKey key{svc.serviceNo, "", svc.isLoop};
+    }
+    
+    // Create empty rows for services with no arrivals across all entries
+    for (const std::string& serviceNo : serviceOrder) {
+        if (servicesWithArrivals.find(serviceNo) == servicesWithArrivals.end()) {
+            RowKey key{serviceNo, "", false};  // isLoop doesn't matter for empty rows
             if (rowData.find(key) == rowData.end()) {
-                rowData[key].isLoop = svc.isLoop;
-                rowData[key].firstSeenIndex = serviceRowIndex[svc.serviceNo]++;
+                rowData[key].isLoop = false;
+                rowData[key].firstSeenIndex = serviceRowIndex[serviceNo]++;
                 rowData[key].firstSeenVisit = 1;
                 // arrivals vector is left empty
             }

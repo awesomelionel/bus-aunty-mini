@@ -586,6 +586,36 @@ void test_service_with_no_arrivals_kept_as_row() {
     TEST_ASSERT_EQUAL_INT64(-1, result.rows[0].arrivals[2].etaEpoch);
 }
 
+void test_service_with_no_arrivals_across_multiple_entries() {
+    // Service appearing multiple times (different destinations) with no arrivals
+    // should create ONE empty row, not multiple
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [
+          {
+            "ServiceNo": "123",
+            "NextBus": {"EstimatedArrival": "", "Label": "To North"},
+            "NextBus2": {"EstimatedArrival": "", "Label": ""},
+            "NextBus3": {"EstimatedArrival": "", "Label": ""}
+          },
+          {
+            "ServiceNo": "123",
+            "NextBus": {"EstimatedArrival": "", "Label": "To South"},
+            "NextBus2": {"EstimatedArrival": "", "Label": ""},
+            "NextBus3": {"EstimatedArrival": "", "Label": ""}
+          }
+        ]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    TEST_ASSERT_EQUAL_STRING("123", result.rows[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("", result.rows[0].label.c_str());
+    TEST_ASSERT_EQUAL_INT64(-1, result.rows[0].arrivals[0].etaEpoch);
+}
+
 void setup() {}
 void loop() {}
 
@@ -627,5 +657,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_labels_hidden_for_single_direction_non_loop);
     RUN_TEST(test_labels_shown_for_loops_even_with_one_label);
     RUN_TEST(test_service_with_no_arrivals_kept_as_row);
+    RUN_TEST(test_service_with_no_arrivals_across_multiple_entries);
     return UNITY_END();
 }
