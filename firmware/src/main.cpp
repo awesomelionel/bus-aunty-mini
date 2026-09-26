@@ -27,7 +27,6 @@
 
 namespace {
 
-constexpr uint32_t kPollIntervalMs = 60000;
 constexpr uint32_t kPortalHoldMs = 3000;
 constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
@@ -50,7 +49,6 @@ bool stopsDirty = false;
 bool alwaysOnDirty = false;
 bool win95ThemeDirty = false;
 size_t currentStopIndex = 0;
-uint32_t lastPollMillis = 0;
 BackoffState backoffState;
 bool needsImmediateFetch = true;
 uint32_t lastDisplayRefreshMs = 0;
@@ -387,7 +385,6 @@ void enterSleep() {
     connectingRendered = false;
     inConfigScreen = false;
     needsImmediateFetch = true;
-    lastPollMillis = millis();
     powerMode = PowerMode::Awake;
     noteInteraction();
     ignoreSleepClickUntilMs = millis() + kIgnoreSleepClickAfterWakeMs;
@@ -451,7 +448,6 @@ void onLinkState(WifiLinkState next) {
         offlineRendered = false;
         connectingRendered = false;
         needsImmediateFetch = true;
-        lastPollMillis = millis();
         noteInteraction();
     } else if (lastLinkState == WifiLinkState::Connected) {
         configServerStopMdns();
@@ -637,7 +633,6 @@ void loop() {
     // Attempt fetch based on backoff schedule
     if (needsImmediateFetch || shouldAttemptFetch(backoffState, now)) {
         pollAndRender();
-        lastPollMillis = now;
         lastDisplayRefreshMs = now;
         needsImmediateFetch = false;
     }
