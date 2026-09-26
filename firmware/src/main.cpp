@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/arrival_parser.h"
+#include "core/backoff_scheduler.h"
 #include "core/bus_stop_config.h"
 #include "core/night_window.h"
 #include "core/sleep_policy.h"
@@ -27,9 +28,6 @@
 namespace {
 
 constexpr uint32_t kPollIntervalMs = 60000;
-constexpr uint32_t kBackoffIntervalsMs[] = {60000, 120000, 240000, 300000};
-constexpr size_t kMaxBackoffStep = sizeof(kBackoffIntervalsMs) / sizeof(kBackoffIntervalsMs[0]);
-constexpr uint32_t kStaleDataThresholdMs = 600000;  // 10 minutes
 constexpr uint32_t kPortalHoldMs = 3000;
 constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
@@ -53,8 +51,9 @@ bool alwaysOnDirty = false;
 bool win95ThemeDirty = false;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
-size_t backoffStep = 0;
+BackoffState backoffState;
 bool needsImmediateFetch = true;
+uint32_t lastDisplayRefreshMs = 0;
 bool noStopsRendered = false;
 bool offlineRendered = false;
 bool connectingRendered = false;
@@ -228,13 +227,15 @@ void pollAndRender() {
     
     // Check if we have valid cache data < 10 minutes old
     bool haveFreshCache = cache.valid && 
-                          (millis() - cache.fetchedAtMillis) < kStaleDataThresholdMs;
+                          !isDataStale(cache.fetchedAtMillis, millis());
     
     // Only show "Loading..." on first fetch or stop change
     if (!cache.valid) {
         displayShowStatus("Loading " + label + "...");
     }
 
+    backoffState.lastAttemptMs = millis();
+    
     wifiLinkSetBusy(true);
     FetchResult fetch = fetchBusArrival(stop.code);
     wifiLinkSetBusy(false);
@@ -246,14 +247,12 @@ void pollAndRender() {
             cache.valid = false;
             cache.rows.clear();
             displayShowStatus("No data for " + label);
-            backoffStep = 0;  // Reset backoff
+            resetBackoff(backoffState);
             return;
         }
         
         // Network error, timeout, or 5xx - increment backoff, keep cached data
-        if (backoffStep < kMaxBackoffStep) {
-            ++backoffStep;
-        }
+        incrementBackoff(backoffState);
         // Fall back to stale cache if < 10 minutes old
         if (haveFreshCache) {
             renderCachedPage();
@@ -267,9 +266,7 @@ void pollAndRender() {
     ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
     if (!parsed.valid) {
         // Parse error - increment backoff, fall back to cache
-        if (backoffStep < kMaxBackoffStep) {
-            ++backoffStep;
-        }
+        incrementBackoff(backoffState);
         if (haveFreshCache) {
             renderCachedPage();
         } else {
@@ -285,7 +282,7 @@ void pollAndRender() {
         cache.fetchedAtMillis = millis();
         cache.valid = true;
         displayShowStatus(label + ": no services");
-        backoffStep = 0;
+        resetBackoff(backoffState);
         return;
     }
 
@@ -295,7 +292,7 @@ void pollAndRender() {
     cache.label = label;
     cache.fetchedAtMillis = millis();
     cache.valid = true;
-    backoffStep = 0;
+    resetBackoff(backoffState);
     
     bool hasLabels = cachedRowsHaveLabels(cache.rows);
     if (currentPage >=
@@ -612,10 +609,18 @@ void loop() {
     }
 
     uint32_t now = millis();
-    uint32_t pollInterval = backoffStep > 0 ? kBackoffIntervalsMs[backoffStep - 1] : kPollIntervalMs;
-    if (needsImmediateFetch || now - lastPollMillis >= pollInterval) {
+    
+    // Refresh display periodically to update ETAs and stale age
+    if (shouldRefreshDisplay(lastDisplayRefreshMs, now)) {
+        renderCachedPage();
+        lastDisplayRefreshMs = now;
+    }
+    
+    // Attempt fetch based on backoff schedule
+    if (needsImmediateFetch || shouldAttemptFetch(backoffState, now)) {
         pollAndRender();
         lastPollMillis = now;
+        lastDisplayRefreshMs = now;
         needsImmediateFetch = false;
     }
 }
