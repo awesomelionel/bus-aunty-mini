@@ -240,7 +240,7 @@ void pollAndRender() {
         return;
     }
     
-    if (parsed.services.empty()) {
+    if (parsed.rows.empty()) {
         // Empty services is not an error state
         cachedRows.clear();
         cachedLabel = label;

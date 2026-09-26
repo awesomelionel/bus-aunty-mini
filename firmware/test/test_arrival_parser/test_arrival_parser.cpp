@@ -395,6 +395,18 @@ void test_flatten_keeps_labels_for_loops() {
     TEST_ASSERT_TRUE(result.rows[0].isLoop);
 }
 
+void test_v2_empty_services_array() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": []
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(0, result.rows.size());
+}
+
 void setup() {}
 void loop() {}
 
@@ -428,5 +440,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_flatten_skips_empty_slots);
     RUN_TEST(test_flatten_clears_labels_for_single_direction_services);
     RUN_TEST(test_flatten_keeps_labels_for_loops);
+    RUN_TEST(test_v2_empty_services_array);
     return UNITY_END();
 }
