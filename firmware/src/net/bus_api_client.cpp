@@ -1,7 +1,6 @@
 // firmware/src/net/bus_api_client.cpp
 #include "net/bus_api_client.h"
 
-#include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
@@ -42,42 +41,10 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
 
     result.httpStatus = http.GET();
     if (result.httpStatus == HTTP_CODE_OK) {
-        // Use streaming deserialization with filter to reduce peak RAM usage.
-        // The filter tells ArduinoJson which fields to keep, discarding others
-        // during parse instead of allocating memory for them.
-        JsonDocument filter;
-        filter["busStops"][0]["BusStopCode"] = true;
-        filter["busStops"][0]["Services"][0]["ServiceNo"] = true;
-        filter["busStops"][0]["Services"][0]["Loop"]["IsLoop"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus"]["EstimatedArrival"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus"]["Load"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus"]["Type"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus"]["VisitNumber"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus"]["Label"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus2"]["EstimatedArrival"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus2"]["Load"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus2"]["Type"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus2"]["VisitNumber"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus2"]["Label"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus3"]["EstimatedArrival"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus3"]["Load"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus3"]["Type"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus3"]["VisitNumber"] = true;
-        filter["busStops"][0]["Services"][0]["NextBus3"]["Label"] = true;
-        
-        JsonDocument doc;
-        WiFiClient* stream = http.getStreamPtr();
-        DeserializationError err = deserializeJson(doc, *stream, DeserializationOption::Filter(filter));
-        
-        if (!err) {
-            // Serialize directly to result.body string (parser expects JSON string)
-            serializeJson(doc, result.body);
-            result.ok = true;
-        } else {
-            // JSON parse error - set parseError flag
-            result.ok = false;
-            result.parseError = true;
-        }
+        // Read response body directly as string
+        // arrival_parser.cpp will parse it with its own filter
+        result.body = http.getString().c_str();
+        result.ok = !result.body.empty();
     }
 
     http.end();
