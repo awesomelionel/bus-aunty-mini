@@ -232,10 +232,10 @@ on the device so it scans immediately rather than waiting out a backoff.
 The arrivals screen shows a header of `<stop name or code> (<n>/<total>)`, a
 battery icon in the top-right, and one row per service: service number on the
 left, then its three arrival times right-aligned in three columns. Times are
-rendered as minutes from now — `Due` for anything at or before now, `Nm` up to
-an hour, `60+` beyond that, and `--` when the API gave no time for that slot.
-This screen does not change look between day and night — only the Windows 95
-screen below does.
+rendered as minutes from now — `Arr` for anything at or before now, plain
+minutes up to an hour, `60+` beyond that, and `--` when the API gave no time
+for that slot. This screen does not change look between day and night — only
+the Windows 95 screen below does.
 
 ### Windows 95 screen (T-Display-S3 only)
 
