@@ -10,11 +10,19 @@
 FetchResult fetchBusArrival(const std::string& busStopCode) {
     FetchResult result;
 
+#ifdef ESP32
+    // Log heap before fetch
+    uint32_t heapBefore = ESP.getFreeHeap();
+    uint32_t maxAllocBefore = ESP.getMaxAllocHeap();
+    Serial.printf("[heap] before fetch: free=%u max_alloc=%u\n", heapBefore, maxAllocBefore);
+#endif
+
     WiFiClientSecure client;
     client.setCACert(kGtsRootR4Pem);
 
     HTTPClient http;
     http.setTimeout(8000);
+    http.useHTTP10(true);
 
     std::string url =
         "https://api.busaunty.com/api/v2/BusArrival?BusStopCode=" + busStopCode;
@@ -24,8 +32,6 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
 
     result.httpStatus = http.GET();
     if (result.httpStatus == HTTP_CODE_OK) {
-        result.ok = true;
-        
         // Use streaming deserialization with filter to reduce peak RAM usage.
         // The filter tells ArduinoJson which fields to keep, discarding others
         // during parse instead of allocating memory for them.
@@ -54,13 +60,26 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
         DeserializationError err = deserializeJson(doc, *stream, DeserializationOption::Filter(filter));
         
         if (!err) {
-            // Serialize filtered doc back to string for parser compatibility
+            // Serialize directly to result.body string
             serializeJson(doc, result.body);
+            result.ok = true;
         } else {
+            // JSON parse error - report as bad data, not fetch failure
             result.ok = false;
+            result.body = "Bad data";
         }
     }
 
     http.end();
+
+#ifdef ESP32
+    // Log heap after fetch
+    uint32_t heapAfter = ESP.getFreeHeap();
+    uint32_t maxAllocAfter = ESP.getMaxAllocHeap();
+    Serial.printf("[heap] after fetch: free=%u max_alloc=%u (delta: %d)\n", 
+                  heapAfter, maxAllocAfter, 
+                  static_cast<int32_t>(heapAfter) - static_cast<int32_t>(heapBefore));
+#endif
+
     return result;
 }
