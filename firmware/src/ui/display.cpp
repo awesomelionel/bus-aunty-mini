@@ -6,6 +6,7 @@
 
 #include "board/board.h"
 #include "core/eta_format.h"
+#include "core/header_format.h"
 #include "core/layout.h"
 #include "core/night_window.h"
 #include "core/text_utils.h"
@@ -428,7 +429,8 @@ void drawFramedArrivals(const std::string& stopLabel,
                         const std::vector<BusServiceRow>& rows,
                         int64_t nowEpoch, size_t currentStopIndex,
                         size_t totalStops, size_t currentPage,
-                        size_t totalPages, const hal::PowerStatus& power) {
+                        size_t totalPages, const hal::PowerStatus& power,
+                        uint32_t dataAgeMs) {
     // Check if any row has a label, then select the appropriate layout
     bool hasLabels = false;
     for (const BusServiceRow& row : rows) {
@@ -455,10 +457,36 @@ void drawFramedArrivals(const std::string& stopLabel,
     canvas.setFont(&fonts::DejaVu12);
     canvas.setTextDatum(top_left);
     canvas.setTextColor(p.capInk);
-    const std::string title = stopLabel + "  " +
-                              std::to_string(currentStopIndex + 1) + " of " +
-                              std::to_string(totalStops);
-    drawBoldString(title.c_str(), 4, 3, /*growLeft=*/false);
+    
+    // Build title with age indicator, truncated to end before buttons (x=276)
+    constexpr int kTitleMaxX = 276;
+    constexpr int kTitleStartX = 4;
+    int titleMaxWidth = kTitleMaxX - kTitleStartX;
+    
+    std::string title = stopLabel + "  " +
+                       std::to_string(currentStopIndex + 1) + " of " +
+                       std::to_string(totalStops);
+    
+    // Append age if data is stale (> 60s)
+    if (dataAgeMs > 60000) {
+        uint32_t ageSec = dataAgeMs / 1000;
+        char ageBuf[16];
+        if (ageSec < 120) {
+            std::snprintf(ageBuf, sizeof(ageBuf), " %us", static_cast<unsigned>(ageSec));
+        } else {
+            std::snprintf(ageBuf, sizeof(ageBuf), " %um", static_cast<unsigned>(ageSec / 60));
+        }
+        title += ageBuf;
+    }
+    
+    // Truncate title if needed
+    if (canvas.textWidth(title.c_str()) > titleMaxWidth) {
+        title = truncateText(title, titleMaxWidth, [](const char* s) {
+            return canvas.textWidth(s);
+        });
+    }
+    
+    drawBoldString(title.c_str(), kTitleStartX, 3, /*growLeft=*/false);
 
     // Window buttons, right to left, so they stay put as the title grows.
     int bx = w - 3 - 13;
@@ -815,7 +843,7 @@ void displayShowArrivals(const std::string& stopLabel,
                           uint32_t dataAgeMs) {
     if (win95Theme) {
         drawFramedArrivals(stopLabel, rows, nowEpoch, currentStopIndex,
-                           totalStops, currentPage, totalPages, power);
+                           totalStops, currentPage, totalPages, power, dataAgeMs);
         return;
     }
 
@@ -836,27 +864,15 @@ void displayShowArrivals(const std::string& stopLabel,
     const int rowHeight = layout.rowHeight;
 
     canvas.setTextDatum(top_center);
-    std::string header = stopLabel + " (" +
-                          std::to_string(currentStopIndex + 1) + "/" +
-                          std::to_string(totalStops) + ")";
+    canvas.setFont(arrivalsFont());
     
-    // Add stale indicator if data is older than one poll interval (60s)
-    if (dataAgeMs > 60000) {
-        uint32_t ageSec = dataAgeMs / 1000;
-        char stale[16];
-        if (ageSec < 120) {
-            std::snprintf(stale, sizeof(stale), " %us", static_cast<unsigned>(ageSec));
-        } else {
-            std::snprintf(stale, sizeof(stale), " %um", static_cast<unsigned>(ageSec / 60));
-        }
-        header += stale;
-    }
-    
-    // Truncate header to fit left of battery with 4px left margin
+    // Build header with intelligent truncation
     int maxHeaderWidth = screenWidth() - kHeaderRightPad - 4;
-    std::string truncatedHeader = truncateLabel(header, maxHeaderWidth, arrivalsFont());
+    std::string header = buildHeader(stopLabel, currentStopIndex, totalStops,
+                                    dataAgeMs, maxHeaderWidth,
+                                    [](const char* s) { return canvas.textWidth(s); });
     
-    canvas.drawString(truncatedHeader.c_str(), layout.headerCenterX, 0);
+    canvas.drawString(header.c_str(), layout.headerCenterX, 0);
 
     drawBattery(power);
     
