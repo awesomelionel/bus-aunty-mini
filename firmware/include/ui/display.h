@@ -34,9 +34,9 @@ void displayShowConfig(const std::string& url, const std::string& ip,
 void displayShowWifiOffline();
 void displayShowNoStops();
 // `stopLabel` is the stop's name, or its code when it was left unnamed.
-// `services` is already the slice for `currentPage`.
+// `rows` is already the slice for `currentPage`.
 void displayShowArrivals(const std::string& stopLabel,
-                          const std::vector<BusService>& services,
+                          const std::vector<BusServiceRow>& rows,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
                           size_t totalPages, const hal::PowerStatus& power);

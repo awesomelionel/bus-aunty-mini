@@ -389,7 +389,7 @@ void drawStatusBattery(int right, int centerY, const hal::PowerStatus& power,
 // than the shared ArrivalsLayout, which only supplies the row pitch and the
 // ETA columns.
 void drawFramedArrivals(const std::string& stopLabel,
-                        const std::vector<BusService>& services,
+                        const std::vector<BusServiceRow>& rows,
                         int64_t nowEpoch, size_t currentStopIndex,
                         size_t totalStops, size_t currentPage,
                         size_t totalPages, const hal::PowerStatus& power) {
@@ -449,18 +449,18 @@ void drawFramedArrivals(const std::string& stopLabel,
     canvas.setFont(arrivalsFont());
     const int rowHeight = arrivalsLayout.rowHeight;
     for (size_t i = 0;
-         i < services.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
+         i < rows.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
         const int y = listY + kListMargin + static_cast<int>(i) * rowHeight;
-        const BusService& svc = services[i];
+        const BusServiceRow& row = rows[i];
 
         canvas.setTextColor(p.ink);
         canvas.setTextDatum(top_left);
-        drawBoldString(svc.serviceNo.c_str(), arrivalsLayout.serviceColX + 2,
+        drawBoldString(row.serviceNo.c_str(), arrivalsLayout.serviceColX + 2,
                        y, /*growLeft=*/false);
 
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
-            const BusArrival& arrival = svc.arrivals[col];
+            const BusArrival& arrival = row.arrivals[col];
             const std::string eta = formatEtaMinutes(arrival.etaEpoch,
                                                      nowEpoch);
             uint32_t tint = p.dim;
@@ -719,12 +719,12 @@ void displayShowNoStops() {
 }
 
 void displayShowArrivals(const std::string& stopLabel,
-                          const std::vector<BusService>& services,
+                          const std::vector<BusServiceRow>& rows,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
                           size_t totalPages, const hal::PowerStatus& power) {
     if (win95Theme) {
-        drawFramedArrivals(stopLabel, services, nowEpoch, currentStopIndex,
+        drawFramedArrivals(stopLabel, rows, nowEpoch, currentStopIndex,
                            totalStops, currentPage, totalPages, power);
         return;
     }
@@ -745,17 +745,17 @@ void displayShowArrivals(const std::string& stopLabel,
     drawBattery(power);
 
     for (size_t i = 0;
-         i < services.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
+         i < rows.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
         int y = rowHeight + static_cast<int>(i) * rowHeight;
-        const BusService& svc = services[i];
+        const BusServiceRow& row = rows[i];
 
         canvas.setTextColor(TFT_WHITE, TFT_BLACK);
         canvas.setTextDatum(top_left);
-        canvas.drawString(svc.serviceNo.c_str(), arrivalsLayout.serviceColX, y);
+        canvas.drawString(row.serviceNo.c_str(), arrivalsLayout.serviceColX, y);
 
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
-            const BusArrival& arrival = svc.arrivals[col];
+            const BusArrival& arrival = row.arrivals[col];
             std::string eta = formatEtaMinutes(arrival.etaEpoch, nowEpoch);
 
             // Single argument leaves the text background transparent, which

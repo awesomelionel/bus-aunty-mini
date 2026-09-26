@@ -16,7 +16,7 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
     http.setTimeout(8000);
 
     std::string url =
-        "https://api.busaunty.com/api/v1/BusArrival?BusStopCode=" + busStopCode;
+        "https://api.busaunty.com/api/v2/BusArrival?BusStopCode=" + busStopCode;
     if (!http.begin(client, url.c_str())) {
         return result;
     }

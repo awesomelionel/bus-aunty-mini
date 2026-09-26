@@ -61,7 +61,7 @@ uint32_t lastInteractionMillis = 0;
 uint32_t ignoreSleepClickUntilMs = 0;
 PowerMode powerMode = PowerMode::Awake;
 
-std::vector<BusService> cachedServices;
+std::vector<BusServiceRow> cachedRows;
 std::string cachedLabel;
 size_t currentPage = 0;
 
@@ -113,7 +113,7 @@ void persistDirtySettings() {
         // the old five-row screen can point past the end of a four-row one.
         displaySetTheme(win95Theme);
         currentPage = 0;
-        cachedServices.clear();
+        cachedRows.clear();
         needsImmediateFetch = wifiLinkConnected();
     }
     if (networksDirty) {
@@ -155,9 +155,9 @@ void syncTime() {
 
 void renderCachedPage() {
     size_t totalPages =
-        servicePageCount(cachedServices.size(), servicesPerScreen());
-    std::vector<BusService> page =
-        selectServicePage(cachedServices, servicesPerScreen(), currentPage);
+        servicePageCount(cachedRows.size(), servicesPerScreen());
+    std::vector<BusServiceRow> page =
+        selectServicePage(cachedRows, servicesPerScreen(), currentPage);
     displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
                          hal::powerStatus());
@@ -168,7 +168,7 @@ void pollAndRender() {
     const std::string& label = busStopLabel(stop);
     displayShowStatus("Loading " + label + "...");
 
-    cachedServices.clear();
+    cachedRows.clear();
     wifiLinkSetBusy(true);
     FetchResult fetch = fetchBusArrival(stop.code);
     wifiLinkSetBusy(false);
@@ -190,10 +190,10 @@ void pollAndRender() {
         return;
     }
 
-    cachedServices = parsed.services;
+    cachedRows = parsed.rows;
     cachedLabel = label;
     if (currentPage >=
-        servicePageCount(cachedServices.size(), servicesPerScreen())) {
+        servicePageCount(cachedRows.size(), servicesPerScreen())) {
         currentPage = 0;
     }
     renderCachedPage();
@@ -201,7 +201,7 @@ void pollAndRender() {
 
 void stepForward() {
     size_t totalPages =
-        servicePageCount(cachedServices.size(), servicesPerScreen());
+        servicePageCount(cachedRows.size(), servicesPerScreen());
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();
@@ -241,7 +241,7 @@ void enterSleep() {
 
     wifiLinkOnWake();
 
-    cachedServices.clear();
+    cachedRows.clear();
     currentPage = 0;
     noStopsRendered = false;
     offlineRendered = false;
@@ -307,7 +307,7 @@ void onLinkState(WifiLinkState next) {
         if (!timeSynced) {
             syncTime();
         }
-        cachedServices.clear();
+        cachedRows.clear();
         currentPage = 0;
         noStopsRendered = false;
         offlineRendered = false;
@@ -318,7 +318,7 @@ void onLinkState(WifiLinkState next) {
     } else if (lastLinkState == WifiLinkState::Connected) {
         configServerStopMdns();
         timeSynced = false;
-        cachedServices.clear();
+        cachedRows.clear();
         offlineRendered = false;
     }
     if (next != WifiLinkState::ApFallback) {
