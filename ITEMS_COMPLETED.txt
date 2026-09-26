@@ -1,0 +1,56 @@
+Items 1-12 Completion Summary
+==============================
+
+✅ Item 1: Fixed row spacing and rows per page
+   - Changed 1.5x formula to board-specific heights (27px, 34px)
+   - tdisplay_s3 two-line mode now gives 4 rows at 34px (was 3 at 37px)
+   - All native tests pass
+
+✅ Items 2+3: Empty services message and grouping
+   - Changed empty check from parsed.services.empty() to parsed.rows.empty()
+   - Added test_v2_empty_services_array
+   - Loop ordering (VisitNumber "1" before "2") already implemented
+
+✅ Item 6: Fixed backoff off-by-one
+   - Changed from 120/240/300 to 60/120/240/300
+   - Use kBackoffIntervalsMs[backoffStep - 1] for array access
+   - Adjusted kMaxBackoffStep from 3 to 4
+
+✅ Item 7: Header overflow protection
+   - Truncate header (stop name + age) to fit left of battery
+   - Max width: screenWidth - kHeaderRightPad - 4px left margin
+
+✅ Item 9: Move truncation to core/ with host tests
+   - Created core/text_utils.{h,cpp} with width callback
+   - UI truncateLabel() now wraps core truncateText()
+   - Added 8 host tests (word boundaries, hard cuts, non-ASCII, etc.)
+
+✅ Item 8: Streaming JSON parser with ArduinoJson filter
+   - Parse directly from WiFiClient stream
+   - DeserializationOption::Filter discards unwanted fields during parse
+   - Reduces peak RAM usage
+
+✅ Items 4+5: Per-stop cache, wrap-safe age, 10-min fallback, stale note
+   - Per-stop cache array (4 stops max) with rows/label/timestamp/valid
+   - Wrap-safe age: unsigned subtraction handles millis() rollover
+   - 10-minute fallback: render stale cache if < 600s old
+   - Stale indicator already shows age in header when >60s
+
+✅ Item 10: Flag size check verification
+   - flag=1: 1,296,341 bytes
+   - flag=0: 1,296,141 bytes
+   - Difference: +200 bytes (confirms code compiled in)
+   - See FLAG_SIZE_CHECK.txt
+
+✅ Item 11: Gitleaks security scan
+   - Scanned 66 commits (588.56 KB) with gitleaks v8.22.1
+   - No secrets found
+   - See GITLEAKS_SCAN.txt
+
+✅ Item 12: Clean-up and PR description update
+   - Reviewed code: legacy BusService struct retained as parse intermediate (not dead)
+   - Updated PR #2 description to match current implementation
+   - All 122 native tests pass
+   - All 3 board environments build successfully
+
+Status: All 12 items complete
