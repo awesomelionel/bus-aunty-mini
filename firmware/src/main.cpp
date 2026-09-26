@@ -27,7 +27,7 @@ namespace {
 
 constexpr uint32_t kPollIntervalMs = 60000;
 constexpr uint32_t kBackoffIntervalsMs[] = {60000, 120000, 240000, 300000};
-constexpr size_t kMaxBackoffStep = sizeof(kBackoffIntervalsMs) / sizeof(kBackoffIntervalsMs[0]) - 1;
+constexpr size_t kMaxBackoffStep = sizeof(kBackoffIntervalsMs) / sizeof(kBackoffIntervalsMs[0]);
 constexpr uint32_t kStaleDataThresholdMs = 600000;  // 10 minutes
 constexpr uint32_t kPortalHoldMs = 3000;
 constexpr uint32_t kSleepHoldMs = 1500;
@@ -556,7 +556,7 @@ void loop() {
     }
 
     uint32_t now = millis();
-    uint32_t pollInterval = backoffStep > 0 ? kBackoffIntervalsMs[backoffStep] : kPollIntervalMs;
+    uint32_t pollInterval = backoffStep > 0 ? kBackoffIntervalsMs[backoffStep - 1] : kPollIntervalMs;
     if (needsImmediateFetch || now - lastPollMillis >= pollInterval) {
         pollAndRender();
         lastPollMillis = now;
