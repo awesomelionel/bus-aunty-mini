@@ -118,6 +118,26 @@ void test_display_refresh_with_wrap() {
     TEST_ASSERT_TRUE(shouldRefreshDisplay(lastRefresh, nowWrapped));
 }
 
+void test_stale_data_classification() {
+    uint32_t now = 1000000;
+    
+    // Fresh data should not be stale
+    uint32_t fresh = now - 60000;  // 1 minute old
+    TEST_ASSERT_FALSE(isDataStale(fresh, now));
+    
+    // Data at 9:59 should not be stale
+    uint32_t almostStale = now - 599000;
+    TEST_ASSERT_FALSE(isDataStale(almostStale, now));
+    
+    // Data at exactly 10 minutes should be stale
+    uint32_t exactlyTenMin = now - 600000;
+    TEST_ASSERT_TRUE(isDataStale(exactlyTenMin, now));
+    
+    // Old data should be stale
+    uint32_t old = now - 720000;  // 12 minutes
+    TEST_ASSERT_TRUE(isDataStale(old, now));
+}
+
 void setup() {}
 void loop() {}
 
@@ -133,5 +153,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_data_stale_with_wrap);
     RUN_TEST(test_should_refresh_display);
     RUN_TEST(test_display_refresh_with_wrap);
+    RUN_TEST(test_stale_data_classification);
     return UNITY_END();
 }

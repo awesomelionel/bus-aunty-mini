@@ -202,6 +202,12 @@ void renderCachedPage() {
         return;
     }
     
+    // If data is past 10-minute threshold, show error instead of stale rows
+    if (isDataStale(cache.fetchedAtMillis, millis())) {
+        displayShowStatus("No recent data");
+        return;
+    }
+    
     bool hasLabels = cachedRowsHaveLabels(cache.rows);
     size_t totalPages =
         servicePageCount(cache.rows.size(), servicesPerScreen(hasLabels));
@@ -209,7 +215,7 @@ void renderCachedPage() {
         selectServicePage(cache.rows, servicesPerScreen(hasLabels), currentPage);
     
     // Calculate data age (wrap-safe: unsigned subtraction wraps correctly)
-    uint32_t dataAgeMs = millis() - cache.fetchedAtMillis;
+    uint32_t dataAgeMs = dataAgeMs(cache.fetchedAtMillis, millis());
     
     displayShowArrivals(cache.label, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
