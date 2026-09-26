@@ -25,7 +25,10 @@
 
 namespace {
 
-constexpr uint32_t kPollIntervalMs = 30000;
+constexpr uint32_t kPollIntervalMs = 60000;
+constexpr uint32_t kBackoffIntervalsMs[] = {60000, 120000, 240000, 300000};
+constexpr size_t kMaxBackoffStep = sizeof(kBackoffIntervalsMs) / sizeof(kBackoffIntervalsMs[0]) - 1;
+constexpr uint32_t kStaleDataThresholdMs = 600000;  // 10 minutes
 constexpr uint32_t kPortalHoldMs = 3000;
 constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
@@ -49,6 +52,8 @@ bool alwaysOnDirty = false;
 bool win95ThemeDirty = false;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
+uint32_t lastSuccessfulPollMillis = 0;
+size_t backoffStep = 0;
 bool needsImmediateFetch = true;
 bool noStopsRendered = false;
 bool offlineRendered = false;
@@ -158,40 +163,89 @@ void renderCachedPage() {
         servicePageCount(cachedRows.size(), servicesPerScreen());
     std::vector<BusServiceRow> page =
         selectServicePage(cachedRows, servicesPerScreen(), currentPage);
+    
+    // Calculate data age for stale indicator
+    uint32_t dataAgeMs = 0;
+    if (lastSuccessfulPollMillis > 0) {
+        uint32_t now = millis();
+        if (now >= lastSuccessfulPollMillis) {
+            dataAgeMs = now - lastSuccessfulPollMillis;
+        }
+    }
+    
     displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
-                         hal::powerStatus());
+                         hal::powerStatus(), dataAgeMs);
 }
 
 void pollAndRender() {
     const BusStopConfig& stop = busStops[currentStopIndex];
     const std::string& label = busStopLabel(stop);
-    displayShowStatus("Loading " + label + "...");
+    
+    // Only show "Loading..." on first fetch or stop change, not on routine polls
+    if (cachedRows.empty()) {
+        displayShowStatus("Loading " + label + "...");
+    }
 
-    cachedRows.clear();
     wifiLinkSetBusy(true);
     FetchResult fetch = fetchBusArrival(stop.code);
     wifiLinkSetBusy(false);
+    
+    // Handle errors with backoff
     if (!fetch.ok) {
-        displayShowStatus(fetch.httpStatus == 404
-                               ? "No data for " + label
-                               : std::string("Fetch failed (") +
-                                     std::to_string(fetch.httpStatus) + ")");
+        if (fetch.httpStatus == 404) {
+            // 404 is not a backend error - show "No data" and don't cache
+            cachedRows.clear();
+            cachedLabel.clear();
+            displayShowStatus("No data for " + label);
+            backoffStep = 0;  // Reset backoff
+            return;
+        }
+        
+        // Network error, timeout, or 5xx - increment backoff, keep cached data
+        if (backoffStep < kMaxBackoffStep) {
+            ++backoffStep;
+        }
+        // Keep rendering cached data if we have it
+        if (!cachedRows.empty()) {
+            renderCachedPage();
+        } else {
+            displayShowStatus(std::string("Fetch failed (") +
+                              std::to_string(fetch.httpStatus) + ")");
+        }
         return;
     }
 
     ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
     if (!parsed.valid) {
-        displayShowStatus("Bad response for " + label);
+        // Parse error - increment backoff, keep cached data
+        if (backoffStep < kMaxBackoffStep) {
+            ++backoffStep;
+        }
+        if (!cachedRows.empty()) {
+            renderCachedPage();
+        } else {
+            displayShowStatus("Bad response for " + label);
+        }
         return;
     }
+    
     if (parsed.services.empty()) {
+        // Empty services is not an error state
+        cachedRows.clear();
+        cachedLabel = label;
         displayShowStatus(label + ": no services");
+        backoffStep = 0;
+        lastSuccessfulPollMillis = millis();
         return;
     }
 
+    // Success - update cache, reset backoff
     cachedRows = parsed.rows;
     cachedLabel = label;
+    backoffStep = 0;
+    lastSuccessfulPollMillis = millis();
+    
     if (currentPage >=
         servicePageCount(cachedRows.size(), servicesPerScreen())) {
         currentPage = 0;
@@ -490,7 +544,8 @@ void loop() {
     }
 
     uint32_t now = millis();
-    if (needsImmediateFetch || now - lastPollMillis >= kPollIntervalMs) {
+    uint32_t pollInterval = backoffStep > 0 ? kBackoffIntervalsMs[backoffStep] : kPollIntervalMs;
+    if (needsImmediateFetch || now - lastPollMillis >= pollInterval) {
         pollAndRender();
         lastPollMillis = now;
         needsImmediateFetch = false;

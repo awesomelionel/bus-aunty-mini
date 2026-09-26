@@ -809,7 +809,8 @@ void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusServiceRow>& rows,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
-                          size_t totalPages, const hal::PowerStatus& power) {
+                          size_t totalPages, const hal::PowerStatus& power,
+                          uint32_t dataAgeMs) {
     if (win95Theme) {
         drawFramedArrivals(stopLabel, rows, nowEpoch, currentStopIndex,
                            totalStops, currentPage, totalPages, power);
@@ -827,6 +828,19 @@ void displayShowArrivals(const std::string& stopLabel,
     std::string header = stopLabel + " (" +
                           std::to_string(currentStopIndex + 1) + "/" +
                           std::to_string(totalStops) + ")";
+    
+    // Add stale indicator if data is older than one poll interval (60s)
+    if (dataAgeMs > 60000) {
+        uint32_t ageSec = dataAgeMs / 1000;
+        char stale[16];
+        if (ageSec < 120) {
+            std::snprintf(stale, sizeof(stale), " %us", static_cast<unsigned>(ageSec));
+        } else {
+            std::snprintf(stale, sizeof(stale), " %um", static_cast<unsigned>(ageSec / 60));
+        }
+        header += stale;
+    }
+    
     canvas.drawString(header.c_str(), arrivalsLayout.headerCenterX, 0);
 
     drawBattery(power);

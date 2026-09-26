@@ -35,8 +35,10 @@ void displayShowWifiOffline();
 void displayShowNoStops();
 // `stopLabel` is the stop's name, or its code when it was left unnamed.
 // `rows` is already the slice for `currentPage`.
+// `dataAgeMs` is millis() - lastSuccessfulPollMillis; 0 means fresh data.
 void displayShowArrivals(const std::string& stopLabel,
                           const std::vector<BusServiceRow>& rows,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
-                          size_t totalPages, const hal::PowerStatus& power);
+                          size_t totalPages, const hal::PowerStatus& power,
+                          uint32_t dataAgeMs = 0);
