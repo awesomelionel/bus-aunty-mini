@@ -326,6 +326,14 @@ constexpr int kWifiIconInkHeight = 68;
 constexpr float kWifiIconScale = 0.25f;
 constexpr int kWifiIconTextGap = 12;
 
+constexpr int kBatteryBodyWidth = 20;
+constexpr int kBatteryHeight = 11;
+constexpr int kBatteryTipWidth = 2;
+constexpr int kBatteryTipHeight = 5;
+constexpr int kBatteryRightMargin = 2;
+constexpr int kBatteryY = 2;
+constexpr int kBatteryLowPercent = 20;
+
 // The service rows and the header end a few pixels short of the bottom edge,
 // leaving room for an indicator that shows which page of a long service list
 // is on screen.
@@ -347,13 +355,6 @@ void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY) {
     }
 }
 
-constexpr int kBatteryBodyWidth = 20;
-constexpr int kBatteryHeight = 11;
-constexpr int kBatteryTipWidth = 2;
-constexpr int kBatteryTipHeight = 5;
-constexpr int kBatteryRightMargin = 2;
-constexpr int kBatteryY = 2;
-constexpr int kBatteryLowPercent = 20;
 // The header is centred in what the battery icon leaves free, so a long stop
 // name cannot run underneath it.
 constexpr int kHeaderRightPad =

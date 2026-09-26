@@ -3,8 +3,6 @@
 #include <ArduinoJson.h>
 
 #include <algorithm>
-#include <map>
-#include <set>
 #include <string>
 
 #include "core/iso8601.h"
@@ -135,116 +133,158 @@ std::string stripToPrefix(const std::string& label) {
 }
 
 std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services) {
-    std::vector<BusServiceRow> rows;
-    
-    // Key rows by (serviceNo, label) only - merge arrivals from both visit numbers
-    struct RowKey {
+    struct RowData {
         std::string serviceNo;
         std::string label;
-        bool isLoop;
-        
-        bool operator<(const RowKey& other) const {
-            if (serviceNo != other.serviceNo) return serviceNo < other.serviceNo;
-            return label < other.label;
-        }
-        bool operator==(const RowKey& other) const {
-            return serviceNo == other.serviceNo && label == other.label;
-        }
-    };
-    
-    struct RowData {
-        std::vector<BusArrival> arrivals;
         bool isLoop = false;
-        int firstSeenVisit = 0;  // Track whether visit "1" or "2" was seen first
-        size_t firstSeenIndex = 0;  // Track order within service
+        std::vector<BusArrival> arrivals;
+        int firstSeenVisit = 0;
+        size_t firstSeenIndex = 0;
     };
     
-    std::map<RowKey, RowData> rowData;
-    std::vector<std::string> serviceOrder;  // Track service order from API
-    std::map<std::string, size_t> serviceRowIndex;  // Track row index within service
-    std::set<std::string> servicesWithArrivals;  // Track which services have at least one arrival
+    std::vector<RowData> rowData;
+    std::vector<std::string> serviceOrder;
+    std::vector<std::string> servicesWithArrivals;
     
     for (const BusService& svc : services) {
         // Track first-seen service order
-        if (std::find(serviceOrder.begin(), serviceOrder.end(), svc.serviceNo) == serviceOrder.end()) {
+        bool foundService = false;
+        for (const std::string& s : serviceOrder) {
+            if (s == svc.serviceNo) {
+                foundService = true;
+                break;
+            }
+        }
+        if (!foundService) {
             serviceOrder.push_back(svc.serviceNo);
-            serviceRowIndex[svc.serviceNo] = 0;
         }
         
         for (size_t i = 0; i < kArrivalsPerService; ++i) {
             const BusArrival& arr = svc.arrivals[i];
             if (arr.etaEpoch < 0) {
-                continue;  // Skip empty slots
+                continue;
             }
-            servicesWithArrivals.insert(svc.serviceNo);
+            
+            // Track services with arrivals
+            bool foundWithArrivals = false;
+            for (const std::string& s : servicesWithArrivals) {
+                if (s == svc.serviceNo) {
+                    foundWithArrivals = true;
+                    break;
+                }
+            }
+            if (!foundWithArrivals) {
+                servicesWithArrivals.push_back(svc.serviceNo);
+            }
             
             std::string label = stripToPrefix(svc.labels[i]);
-            RowKey key{svc.serviceNo, label, svc.isLoop};
             
-            if (rowData.find(key) == rowData.end()) {
-                // First time seeing this (service, label) pair
-                rowData[key].isLoop = svc.isLoop;
-                rowData[key].firstSeenIndex = serviceRowIndex[svc.serviceNo]++;
-                // Track whether visit "1" or "2" appeared first
-                rowData[key].firstSeenVisit = (arr.visitNumber == "2") ? 2 : 1;
+            // Find or create row
+            RowData* found = nullptr;
+            for (RowData& rd : rowData) {
+                if (rd.serviceNo == svc.serviceNo && rd.label == label) {
+                    found = &rd;
+                    break;
+                }
             }
-            rowData[key].arrivals.push_back(arr);
+            
+            if (!found) {
+                RowData newRow;
+                newRow.serviceNo = svc.serviceNo;
+                newRow.label = label;
+                newRow.isLoop = svc.isLoop;
+                newRow.firstSeenVisit = (arr.visitNumber == "2") ? 2 : 1;
+                // Count existing rows for this service
+                size_t idx = 0;
+                for (const RowData& rd : rowData) {
+                    if (rd.serviceNo == svc.serviceNo) ++idx;
+                }
+                newRow.firstSeenIndex = idx;
+                rowData.push_back(newRow);
+                found = &rowData.back();
+            }
+            found->arrivals.push_back(arr);
         }
     }
     
-    // Create empty rows for services with no arrivals across all entries
+    // Create empty rows for services with no arrivals
     for (const std::string& serviceNo : serviceOrder) {
-        if (servicesWithArrivals.find(serviceNo) == servicesWithArrivals.end()) {
-            RowKey key{serviceNo, "", false};  // isLoop doesn't matter for empty rows
-            if (rowData.find(key) == rowData.end()) {
-                rowData[key].isLoop = false;
-                rowData[key].firstSeenIndex = serviceRowIndex[serviceNo]++;
-                rowData[key].firstSeenVisit = 1;
-                // arrivals vector is left empty
+        bool hasArrivals = false;
+        for (const std::string& s : servicesWithArrivals) {
+            if (s == serviceNo) {
+                hasArrivals = true;
+                break;
+            }
+        }
+        if (!hasArrivals) {
+            bool alreadyHasRow = false;
+            for (const RowData& rd : rowData) {
+                if (rd.serviceNo == serviceNo) {
+                    alreadyHasRow = true;
+                    break;
+                }
+            }
+            if (!alreadyHasRow) {
+                RowData newRow;
+                newRow.serviceNo = serviceNo;
+                newRow.label = "";
+                newRow.isLoop = false;
+                newRow.firstSeenVisit = 1;
+                newRow.firstSeenIndex = 0;
+                rowData.push_back(newRow);
             }
         }
     }
     
-    // Build rows: services in API order, within each service visit-1 rows before visit-2 rows,
-    // preserving first-seen order within each visit number
+    // Build output rows
+    std::vector<BusServiceRow> rows;
     for (const std::string& serviceNo : serviceOrder) {
-        std::vector<std::pair<RowKey, RowData*>> serviceRows;
-        for (auto& pair : rowData) {
-            if (pair.first.serviceNo == serviceNo) {
-                serviceRows.push_back({pair.first, &pair.second});
+        // Collect rows for this service
+        std::vector<RowData*> serviceRows;
+        for (RowData& rd : rowData) {
+            if (rd.serviceNo == serviceNo) {
+                serviceRows.push_back(&rd);
             }
         }
         
-        // Sort: visit-1 rows (firstSeenVisit==1) before visit-2 rows (firstSeenVisit==2),
-        // then by firstSeenIndex to preserve API order
-        std::sort(serviceRows.begin(), serviceRows.end(),
-                  [](const std::pair<RowKey, RowData*>& a, const std::pair<RowKey, RowData*>& b) {
-                      if (a.second->firstSeenVisit != b.second->firstSeenVisit) {
-                          return a.second->firstSeenVisit < b.second->firstSeenVisit;
-                      }
-                      return a.second->firstSeenIndex < b.second->firstSeenIndex;
-                  });
+        // Sort by visit then index
+        for (size_t i = 0; i < serviceRows.size(); ++i) {
+            for (size_t j = i + 1; j < serviceRows.size(); ++j) {
+                bool swap = false;
+                if (serviceRows[i]->firstSeenVisit > serviceRows[j]->firstSeenVisit) {
+                    swap = true;
+                } else if (serviceRows[i]->firstSeenVisit == serviceRows[j]->firstSeenVisit &&
+                          serviceRows[i]->firstSeenIndex > serviceRows[j]->firstSeenIndex) {
+                    swap = true;
+                }
+                if (swap) {
+                    RowData* tmp = serviceRows[i];
+                    serviceRows[i] = serviceRows[j];
+                    serviceRows[j] = tmp;
+                }
+            }
+        }
         
-        for (const auto& pair : serviceRows) {
-            const RowKey& key = pair.first;
-            RowData* data = pair.second;
+        for (RowData* data : serviceRows) {
+            // Sort arrivals by ETA
+            for (size_t i = 0; i < data->arrivals.size(); ++i) {
+                for (size_t j = i + 1; j < data->arrivals.size(); ++j) {
+                    if (data->arrivals[i].etaEpoch > data->arrivals[j].etaEpoch) {
+                        BusArrival tmp = data->arrivals[i];
+                        data->arrivals[i] = data->arrivals[j];
+                        data->arrivals[j] = tmp;
+                    }
+                }
+            }
             
             BusServiceRow row;
-            row.serviceNo = key.serviceNo;
-            row.label = key.label;
+            row.serviceNo = data->serviceNo;
+            row.label = data->label;
             row.isLoop = data->isLoop;
             
-            // Sort arrivals by ETA
-            std::sort(data->arrivals.begin(), data->arrivals.end(),
-                      [](const BusArrival& a, const BusArrival& b) {
-                          return a.etaEpoch < b.etaEpoch;
-                      });
-            
-            // Copy up to kArrivalsPerService arrivals
-            for (size_t i = 0; i < data->arrivals.size() && i < kArrivalsPerService; ++i) {
+            for (size_t i = 0; i < kArrivalsPerService && i < data->arrivals.size(); ++i) {
                 row.arrivals[i] = data->arrivals[i];
             }
-            // Fill remaining slots with empty arrivals
             for (size_t i = data->arrivals.size(); i < kArrivalsPerService; ++i) {
                 row.arrivals[i] = BusArrival{};
             }
@@ -253,59 +293,103 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
         }
     }
     
-    // For each service, find distinct non-empty labels and collect all arrivals
-    std::map<std::string, std::set<std::string>> serviceLabels;
-    std::map<std::string, std::vector<BusArrival>> serviceEmptyLabelArrivals;
+    // For each service, find distinct non-empty labels and collect empty-label arrivals
+    struct ServiceLabelInfo {
+        std::string serviceNo;
+        std::vector<std::string> distinctLabels;
+        std::vector<BusArrival> emptyLabelArrivals;
+    };
+    std::vector<ServiceLabelInfo> labelInfo;
     
     for (const BusServiceRow& row : rows) {
+        ServiceLabelInfo* info = nullptr;
+        for (ServiceLabelInfo& si : labelInfo) {
+            if (si.serviceNo == row.serviceNo) {
+                info = &si;
+                break;
+            }
+        }
+        if (!info) {
+            ServiceLabelInfo newInfo;
+            newInfo.serviceNo = row.serviceNo;
+            labelInfo.push_back(newInfo);
+            info = &labelInfo.back();
+        }
+        
         if (!row.label.empty()) {
-            serviceLabels[row.serviceNo].insert(row.label);
+            bool found = false;
+            for (const std::string& lbl : info->distinctLabels) {
+                if (lbl == row.label) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                info->distinctLabels.push_back(row.label);
+            }
         } else {
-            // Collect arrivals from empty-label rows
             for (const BusArrival& arr : row.arrivals) {
                 if (arr.etaEpoch >= 0) {
-                    serviceEmptyLabelArrivals[row.serviceNo].push_back(arr);
+                    info->emptyLabelArrivals.push_back(arr);
                 }
             }
         }
     }
     
-    // Identify services where empty-label arrivals should be merged
-    std::set<std::string> servicesToMerge;
-    for (const auto& pair : serviceLabels) {
-        if (pair.second.size() == 1 && serviceEmptyLabelArrivals.count(pair.first)) {
-            servicesToMerge.insert(pair.first);
+    // Identify services to merge (1 distinct label + has empty-label arrivals)
+    std::vector<std::string> servicesToMerge;
+    for (const ServiceLabelInfo& si : labelInfo) {
+        if (si.distinctLabels.size() == 1 && !si.emptyLabelArrivals.empty()) {
+            servicesToMerge.push_back(si.serviceNo);
         }
     }
     
-    // Build final row list, merging empty-label arrivals where needed
+    // Build final row list with merging
     std::vector<BusServiceRow> mergedRows;
     for (BusServiceRow& row : rows) {
-        const std::string& svc = row.serviceNo;
+        bool shouldMerge = false;
+        for (const std::string& svc : servicesToMerge) {
+            if (row.serviceNo == svc) {
+                shouldMerge = true;
+                break;
+            }
+        }
         
         // Skip empty-label rows that will be merged
-        if (row.label.empty() && servicesToMerge.count(svc)) {
+        if (row.label.empty() && shouldMerge) {
             continue;
         }
         
-        // If this is the labeled row for a service that needs merging, merge now
-        if (!row.label.empty() && servicesToMerge.count(svc)) {
-            // Collect all arrivals (existing + empty-label ones)
+        // Merge empty-label arrivals into labeled row
+        if (!row.label.empty() && shouldMerge) {
             std::vector<BusArrival> allArrivals;
             for (const BusArrival& arr : row.arrivals) {
                 if (arr.etaEpoch >= 0) {
                     allArrivals.push_back(arr);
                 }
             }
-            for (const BusArrival& arr : serviceEmptyLabelArrivals[svc]) {
-                allArrivals.push_back(arr);
+            
+            // Find empty-label arrivals for this service
+            for (const ServiceLabelInfo& si : labelInfo) {
+                if (si.serviceNo == row.serviceNo) {
+                    for (const BusArrival& arr : si.emptyLabelArrivals) {
+                        allArrivals.push_back(arr);
+                    }
+                    break;
+                }
             }
-            // Sort by ETA
-            std::sort(allArrivals.begin(), allArrivals.end(),
-                      [](const BusArrival& a, const BusArrival& b) {
-                          return a.etaEpoch < b.etaEpoch;
-                      });
-            // Copy back
+            
+            // Sort by ETA using bubble sort
+            for (size_t i = 0; i < allArrivals.size(); ++i) {
+                for (size_t j = i + 1; j < allArrivals.size(); ++j) {
+                    if (allArrivals[i].etaEpoch > allArrivals[j].etaEpoch) {
+                        BusArrival tmp = allArrivals[i];
+                        allArrivals[i] = allArrivals[j];
+                        allArrivals[j] = tmp;
+                    }
+                }
+            }
+            
             for (size_t i = 0; i < kArrivalsPerService; ++i) {
                 if (i < allArrivals.size()) {
                     row.arrivals[i] = allArrivals[i];
@@ -320,22 +404,55 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
     rows = mergedRows;
     
     // Determine which services should show labels
-    // A service shows labels if: (1) it has 2+ distinct non-empty labels, OR (2) it's a loop
-    std::map<std::string, std::set<std::string>> serviceNonEmptyLabels;
-    std::map<std::string, bool> serviceIsLoop;
+    struct ServiceDisplayInfo {
+        std::string serviceNo;
+        std::vector<std::string> nonEmptyLabels;
+        bool isLoop = false;
+    };
+    std::vector<ServiceDisplayInfo> displayInfo;
+    
     for (const BusServiceRow& row : rows) {
+        ServiceDisplayInfo* info = nullptr;
+        for (ServiceDisplayInfo& di : displayInfo) {
+            if (di.serviceNo == row.serviceNo) {
+                info = &di;
+                break;
+            }
+        }
+        if (!info) {
+            ServiceDisplayInfo newInfo;
+            newInfo.serviceNo = row.serviceNo;
+            newInfo.isLoop = false;
+            displayInfo.push_back(newInfo);
+            info = &displayInfo.back();
+        }
+        
         if (!row.label.empty()) {
-            serviceNonEmptyLabels[row.serviceNo].insert(row.label);
+            bool found = false;
+            for (const std::string& lbl : info->nonEmptyLabels) {
+                if (lbl == row.label) {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                info->nonEmptyLabels.push_back(row.label);
+            }
         }
         if (row.isLoop) {
-            serviceIsLoop[row.serviceNo] = true;
+            info->isLoop = true;
         }
     }
     
-    // Clear labels for services that don't meet the criteria
+    // Clear labels for services that don't show labels
     for (BusServiceRow& row : rows) {
-        bool showLabel = serviceIsLoop[row.serviceNo] || 
-                        serviceNonEmptyLabels[row.serviceNo].size() >= 2;
+        bool showLabel = false;
+        for (const ServiceDisplayInfo& di : displayInfo) {
+            if (di.serviceNo == row.serviceNo) {
+                showLabel = di.isLoop || di.nonEmptyLabels.size() >= 2;
+                break;
+            }
+        }
         if (!showLabel) {
             row.label.clear();
         }

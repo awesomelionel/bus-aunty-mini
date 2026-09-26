@@ -213,11 +213,11 @@ void renderCachedPage() {
         selectServicePage(cache.rows, servicesPerScreen(hasLabels), currentPage);
     
     // Calculate data age (wrap-safe: unsigned subtraction wraps correctly)
-    uint32_t dataAgeMs = dataAgeMs(cache.fetchedAtMillis, millis());
+    uint32_t ageMs = dataAgeMs(cache.fetchedAtMillis, millis());
     
     displayShowArrivals(cache.label, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
-                         hal::powerStatus(), dataAgeMs);
+                         hal::powerStatus(), ageMs);
 }
 
 void pollAndRender() {
