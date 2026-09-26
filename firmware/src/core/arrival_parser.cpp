@@ -594,3 +594,16 @@ std::vector<BusService> selectServicePage(
     }
     return selected;
 }
+
+bool shouldShowVisit2Marker(const BusServiceRow& row) {
+    bool hasNonEmptyArrival = false;
+    for (size_t i = 0; i < kArrivalsPerService; ++i) {
+        if (row.arrivals[i].etaEpoch >= 0) {
+            hasNonEmptyArrival = true;
+            if (row.arrivals[i].visitNumber != "2") {
+                return false;  // Found non-visit-2, don't show marker
+            }
+        }
+    }
+    return hasNonEmptyArrival;  // Show marker only if has arrivals and all are visit 2
+}

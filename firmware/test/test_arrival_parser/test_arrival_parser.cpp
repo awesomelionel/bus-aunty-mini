@@ -714,6 +714,30 @@ void test_paging_that_would_split_service() {
     TEST_ASSERT_EQUAL_STRING("222", page1[1].serviceNo.c_str());
 }
 
+void test_should_show_visit2_marker() {
+    BusServiceRow row;
+    row.serviceNo = "125";
+    
+    // Empty row: no marker
+    TEST_ASSERT_FALSE(shouldShowVisit2Marker(row));
+    
+    // Mix of visit 1 and 2: no marker
+    row.arrivals[0].etaEpoch = 1000;
+    row.arrivals[0].visitNumber = "1";
+    row.arrivals[1].etaEpoch = 2000;
+    row.arrivals[1].visitNumber = "2";
+    TEST_ASSERT_FALSE(shouldShowVisit2Marker(row));
+    
+    // All visit 2: show marker
+    row.arrivals[0].visitNumber = "2";
+    row.arrivals[1].visitNumber = "2";
+    TEST_ASSERT_TRUE(shouldShowVisit2Marker(row));
+    
+    // All visit 2 with empty slot: show marker
+    row.arrivals[2].etaEpoch = -1;
+    TEST_ASSERT_TRUE(shouldShowVisit2Marker(row));
+}
+
 void setup() {}
 void loop() {}
 
@@ -758,5 +782,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_service_with_no_arrivals_across_multiple_entries);
     RUN_TEST(test_paging_avoids_straddling_multirow_services);
     RUN_TEST(test_paging_that_would_split_service);
+    RUN_TEST(test_should_show_visit2_marker);
     return UNITY_END();
 }

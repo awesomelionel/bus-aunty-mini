@@ -81,3 +81,7 @@ std::vector<BusServiceRow> selectServicePage(
 // Legacy overload for old tests
 std::vector<BusService> selectServicePage(
     const std::vector<BusService>& services, size_t pageSize, size_t page);
+
+// Returns true if row should show "2nd" marker
+// (all non-empty arrivals are visit "2")
+bool shouldShowVisit2Marker(const BusServiceRow& row);
