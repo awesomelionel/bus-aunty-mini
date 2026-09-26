@@ -3,7 +3,8 @@
 #include <cstddef>
 
 // Backoff intervals in milliseconds
-constexpr uint32_t kBackoffIntervalsMs[] = {60000, 120000, 240000, 300000, 300000};
+// [0]=60s normal poll, [1]=60s first retry, [2]=120s, [3]=240s, [4]=300s cap
+constexpr uint32_t kBackoffIntervalsMs[] = {60000, 60000, 120000, 240000, 300000};
 constexpr size_t kMaxBackoffStep = sizeof(kBackoffIntervalsMs) / sizeof(kBackoffIntervalsMs[0]);
 constexpr uint32_t kStaleDataThresholdMs = 600000;  // 10 minutes
 constexpr uint32_t kDisplayRefreshIntervalMs = 15000;  // 15 seconds

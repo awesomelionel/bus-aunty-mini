@@ -8,11 +8,11 @@ void test_first_attempt_returns_true() {
 }
 
 void test_backoff_intervals() {
-    TEST_ASSERT_EQUAL_UINT32(60000, backoffIntervalMs(0));
-    TEST_ASSERT_EQUAL_UINT32(120000, backoffIntervalMs(1));
-    TEST_ASSERT_EQUAL_UINT32(240000, backoffIntervalMs(2));
-    TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(3));
-    TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(4));
+    TEST_ASSERT_EQUAL_UINT32(60000, backoffIntervalMs(0));  // Normal poll
+    TEST_ASSERT_EQUAL_UINT32(60000, backoffIntervalMs(1));  // First retry
+    TEST_ASSERT_EQUAL_UINT32(120000, backoffIntervalMs(2));  // Second retry
+    TEST_ASSERT_EQUAL_UINT32(240000, backoffIntervalMs(3));  // Third retry
+    TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(4));  // Fourth+ retry (cap)
     TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(5));  // Caps at last
 }
 
