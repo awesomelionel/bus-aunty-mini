@@ -553,7 +553,7 @@ void drawFramedArrivals(const std::string& stopLabel,
             // Navy for day palette, cyan for night (higher contrast)
             if (hasVisit2) {
                 int markerX = labelX + canvas.textWidth(truncated.c_str());
-                uint32_t markerColor = (p.capA == 0x000080) ? 0x000080 : TFT_CYAN;
+                uint32_t markerColor = (p.capA == 0x000080) ? 0x000080 : 0x00FFFF;
                 canvas.setTextColor(markerColor);
                 canvas.drawString(" 2nd", markerX, labelY);
                 canvas.setTextColor(p.ink);  // Restore color
