@@ -334,8 +334,9 @@ void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY) {
     constexpr int kDotSpacing = 8;
 
     int y = pageDotsY;
-    int x = screenWidth() / 2 -
-            (static_cast<int>(totalPages - 1) * kDotSpacing) / 2;
+    // Position dots to the right of battery, aligned right
+    int x = screenWidth() - kBatteryRightMargin - 
+            static_cast<int>(totalPages) * kDotSpacing;
     for (size_t i = 0; i < totalPages; ++i) {
         if (i == currentPage) {
             canvas.fillCircle(x, y, kDotRadius, TFT_WHITE);
@@ -893,20 +894,8 @@ void displayShowArrivals(const std::string& stopLabel,
         if (!row.label.empty()) {
             const int labelX = layout.serviceColX;
             const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
-            int maxLabelWidth = board().screenWidth - labelX - 
-                               (board().arrivalsFontHeight >= 24 ? 8 : 8);
-            
-            // On last row of multi-page stop, cap width to avoid collision with page dots
-            if (totalPages > 1 && i == rows.size() - 1) {
-                // Page dots centered at screenWidth/2, with kDotSpacing=8, kDotRadius=2
-                // Leftmost dot starts at: screenWidth/2 - (totalPages-1)*4 - 2
-                int dotsLeftEdge = screenWidth() / 2 - 
-                                  static_cast<int>(totalPages - 1) * 4 - 2 - 4; // 4px clearance
-                int availableWidth = dotsLeftEdge - labelX;
-                if (availableWidth < maxLabelWidth) {
-                    maxLabelWidth = availableWidth;
-                }
-            }
+            const int maxLabelWidth = board().screenWidth - labelX - 
+                                      (board().arrivalsFontHeight >= 24 ? 8 : 8);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
             // Check if this row has any visit-2 arrivals to determine marker reservation
@@ -960,7 +949,9 @@ void displayShowArrivals(const std::string& stopLabel,
     }
 
     if (totalPages > 1) {
-        drawPageDots(currentPage, totalPages, layout.pageDotsY);
+        // Draw page dots in header area, to the right of battery
+        const int dotsY = kBatteryY + kBatteryHeight / 2;
+        drawPageDots(currentPage, totalPages, dotsY);
     }
 
     canvas.pushSprite(0, 0);
