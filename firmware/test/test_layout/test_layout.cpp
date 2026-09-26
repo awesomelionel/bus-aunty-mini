@@ -85,13 +85,13 @@ void test_t_display_s3_layout_at_dejavu24_single_line() {
     TEST_ASSERT_FALSE(layout.hasLabels);
 }
 
-// T-Display-S3 with two-line mode: 320x170 at 25px base with 1.5x = 37px, fits 3 rows
+// T-Display-S3 with two-line mode: 320x170 at 25px base → 34px for 4 rows
 void test_t_display_s3_layout_at_dejavu24_two_line() {
     ArrivalsLayout layout =
         computeArrivalsLayout(320, 170, 25, kBatteryReservedWidth, true);
 
-    TEST_ASSERT_EQUAL_size_t(3, layout.servicesPerScreen);
-    TEST_ASSERT_EQUAL_INT(37, layout.rowHeight);  // 25 + 25/2 = 37
+    TEST_ASSERT_EQUAL_size_t(4, layout.servicesPerScreen);
+    TEST_ASSERT_EQUAL_INT(34, layout.rowHeight);
     TEST_ASSERT_TRUE(layout.hasLabels);
 }
 

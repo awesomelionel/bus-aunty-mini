@@ -26,8 +26,12 @@ ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
     // Two-line pitch for stops with labels: about 27px on 240x135, 34px on 320x170
     // Single-line pitch for stops without: 18px on 240x135, 25px on 320x170
     if (hasLabels) {
-        // Approximate 1.5x spacing for labels
-        layout.rowHeight = rowHeight + rowHeight / 2;
+        // For DejaVu18 (h=18): 27px. For DejaVu24 (h=25): 34px.
+        if (rowHeight >= 24) {
+            layout.rowHeight = 34;
+        } else {
+            layout.rowHeight = 27;
+        }
     } else {
         layout.rowHeight = rowHeight;
     }
