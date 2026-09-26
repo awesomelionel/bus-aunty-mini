@@ -170,11 +170,13 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
             serviceRowIndex[svc.serviceNo] = 0;
         }
         
+        bool hasAnyArrivals = false;
         for (size_t i = 0; i < kArrivalsPerService; ++i) {
             const BusArrival& arr = svc.arrivals[i];
             if (arr.etaEpoch < 0) {
                 continue;  // Skip empty slots
             }
+            hasAnyArrivals = true;
             
             std::string label = stripToPrefix(svc.labels[i]);
             RowKey key{svc.serviceNo, label, svc.isLoop};
@@ -187,6 +189,17 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
                 rowData[key].firstSeenVisit = (arr.visitNumber == "2") ? 2 : 1;
             }
             rowData[key].arrivals.push_back(arr);
+        }
+        
+        // If service has no arrivals, create an empty row
+        if (!hasAnyArrivals) {
+            RowKey key{svc.serviceNo, "", svc.isLoop};
+            if (rowData.find(key) == rowData.end()) {
+                rowData[key].isLoop = svc.isLoop;
+                rowData[key].firstSeenIndex = serviceRowIndex[svc.serviceNo]++;
+                rowData[key].firstSeenVisit = 1;
+                // arrivals vector is left empty
+            }
         }
     }
     
