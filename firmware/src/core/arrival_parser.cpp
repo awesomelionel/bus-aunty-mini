@@ -304,16 +304,24 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
     }
     rows = mergedRows;
     
-    // Determine which services have multiple directions at this stop
-    // A service needs a label if: (1) it appears in multiple rows, OR (2) it's a loop
-    std::map<std::string, int> serviceRowCounts;
+    // Determine which services should show labels
+    // A service shows labels if: (1) it has 2+ distinct non-empty labels, OR (2) it's a loop
+    std::map<std::string, std::set<std::string>> serviceNonEmptyLabels;
+    std::map<std::string, bool> serviceIsLoop;
     for (const BusServiceRow& row : rows) {
-        serviceRowCounts[row.serviceNo]++;
+        if (!row.label.empty()) {
+            serviceNonEmptyLabels[row.serviceNo].insert(row.label);
+        }
+        if (row.isLoop) {
+            serviceIsLoop[row.serviceNo] = true;
+        }
     }
     
-    // Clear labels for single-direction non-loop services
+    // Clear labels for services that don't meet the criteria
     for (BusServiceRow& row : rows) {
-        if (!row.isLoop && serviceRowCounts[row.serviceNo] == 1) {
+        bool showLabel = serviceIsLoop[row.serviceNo] || 
+                        serviceNonEmptyLabels[row.serviceNo].size() >= 2;
+        if (!showLabel) {
             row.label.clear();
         }
     }

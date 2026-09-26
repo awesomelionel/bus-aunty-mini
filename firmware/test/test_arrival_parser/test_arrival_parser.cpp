@@ -498,6 +498,70 @@ void test_empty_label_merges_into_single_non_empty_label() {
     TEST_ASSERT_TRUE(result.rows[0].arrivals[1].etaEpoch < result.rows[0].arrivals[2].etaEpoch);
 }
 
+void test_labels_shown_for_multiple_distinct_labels() {
+    // Service with 2+ distinct non-empty labels should show labels
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [
+          {
+            "ServiceNo": "124",
+            "NextBus": {"EstimatedArrival": "2026-09-26T16:41:00+08:00", "Label": "To St. Michael's Ter"}
+          },
+          {
+            "ServiceNo": "124",
+            "NextBus": {"EstimatedArrival": "2026-09-26T16:46:00+08:00", "Label": "To HarbourFront Int"}
+          }
+        ]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(2, result.rows.size());
+    // Both rows should have labels visible
+    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[0].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("HarbourFront Int", result.rows[1].label.c_str());
+}
+
+void test_labels_hidden_for_single_direction_non_loop() {
+    // Service with only one label and not a loop should hide the label
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "186",
+          "Loop": {"IsLoop": false},
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:56:00+08:00", "Label": "To Shenton Way Ter"}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    // Label should be hidden (empty) for single-direction non-loop
+    TEST_ASSERT_EQUAL_STRING("", result.rows[0].label.c_str());
+}
+
+void test_labels_shown_for_loops_even_with_one_label() {
+    // Loop service should show label even with only one distinct label
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "125",
+          "Loop": {"IsLoop": true},
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:47:00+08:00", "Label": "To Sims"}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    // Label should be visible for loop service
+    TEST_ASSERT_EQUAL_STRING("Sims", result.rows[0].label.c_str());
+    TEST_ASSERT_TRUE(result.rows[0].isLoop);
+}
+
 void setup() {}
 void loop() {}
 
@@ -535,5 +599,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_loop_visit_1_rows_before_visit_2);
     RUN_TEST(test_rows_keyed_by_service_and_label_merge_visits);
     RUN_TEST(test_empty_label_merges_into_single_non_empty_label);
+    RUN_TEST(test_labels_shown_for_multiple_distinct_labels);
+    RUN_TEST(test_labels_hidden_for_single_direction_non_loop);
+    RUN_TEST(test_labels_shown_for_loops_even_with_one_label);
     return UNITY_END();
 }
