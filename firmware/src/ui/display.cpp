@@ -44,11 +44,22 @@ const lgfx::GFXfont* labelFont() {
 
 // Truncate text to fit within maxWidth pixels, cutting at word boundaries.
 // Appends "." if truncated. ASCII only (0x20-0x7E).
+// When BUS_AUNTY_SHOW_VISIT_MARKER is enabled, reserves space for " 2nd" marker.
 std::string truncateLabel(const std::string& text, int maxWidth,
                           const lgfx::GFXfont* font) {
     if (text.empty()) {
         return text;
     }
+    
+    // Reserve space for " 2nd" marker when flag is enabled
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+    canvas.setFont(font);
+    int markerWidth = canvas.textWidth(" 2nd");
+    maxWidth -= markerWidth;
+    if (maxWidth < 10) {  // Sanity check
+        return ".";
+    }
+#endif
     
     // Clean non-ASCII bytes (replace with '?')
     std::string cleaned;
@@ -544,12 +555,12 @@ void drawFramedArrivals(const std::string& stopLabel,
             canvas.drawString(truncated.c_str(), labelX, labelY);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals if enabled
+            // Add "2nd" marker for second-visit arrivals
             for (size_t col = 0; col < kArrivalsPerService; ++col) {
                 const BusArrival& arrival = row.arrivals[col];
                 if (arrival.visitNumber == "2" && arrival.etaEpoch >= 0) {
-                    int markerX = labelX + canvas.textWidth(truncated.c_str()) + 4;
-                    canvas.drawString("2nd", markerX, labelY);
+                    int markerX = labelX + canvas.textWidth(truncated.c_str());
+                    canvas.drawString(" 2nd", markerX, labelY);
                     break;
                 }
             }
@@ -895,12 +906,12 @@ void displayShowArrivals(const std::string& stopLabel,
             canvas.drawString(truncated.c_str(), labelX, labelY);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals if enabled
+            // Add "2nd" marker for second-visit arrivals
             for (size_t col = 0; col < kArrivalsPerService; ++col) {
                 const BusArrival& arrival = row.arrivals[col];
                 if (arrival.visitNumber == "2" && arrival.etaEpoch >= 0) {
-                    int markerX = labelX + canvas.textWidth(truncated.c_str()) + 4;
-                    canvas.drawString("2nd", markerX, labelY);
+                    int markerX = labelX + canvas.textWidth(truncated.c_str());
+                    canvas.drawString(" 2nd", markerX, labelY);
                     break;  // Only show once per row
                 }
             }
