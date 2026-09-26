@@ -1,0 +1,16 @@
+Command:
+gitleaks detect --log-opts="--all" -v
+
+Output:
+
+    ○
+    │╲
+    │ ○
+    ○ ░
+    ░    gitleaks
+
+9:48AM INF 66 commits scanned.
+9:48AM INF scanned ~588564 bytes (588.56 KB) in 70ms
+9:48AM INF no leaks found
+
+Scan completed successfully. No secrets found in repository history.
