@@ -112,6 +112,14 @@ void persistDirtySettings() {
     if (stopsDirty) {
         saveBusStops(busStops);
         stopsDirty = false;
+        // Clear all caches when stops change
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+            cache.stopCode.clear();
+        }
+        currentPage = 0;
+        needsImmediateFetch = wifiLinkConnected();
     }
     if (alwaysOnDirty) {
         saveAlwaysOn(alwaysOn);
@@ -180,12 +188,18 @@ bool cachedRowsHaveLabels(const std::vector<BusServiceRow>& rows) {
 }
 
 void renderCachedPage() {
-    if (currentStopIndex >= kMaxBusStops) {
+    if (currentStopIndex >= kMaxBusStops || currentStopIndex >= busStops.size()) {
         return;
     }
     
     StopCache& cache = stopCaches[currentStopIndex];
     if (!cache.valid) {
+        return;
+    }
+    
+    // Verify cache stopCode matches current stop
+    if (cache.stopCode != busStops[currentStopIndex].code) {
+        cache.valid = false;
         return;
     }
     
@@ -417,12 +431,7 @@ void onLinkState(WifiLinkState next) {
         if (!timeSynced) {
             syncTime();
         }
-        // Invalidate all stop caches when WiFi connects
-        for (StopCache& cache : stopCaches) {
-            cache.valid = false;
-            cache.rows.clear();
-        }
-        currentPage = 0;
+        // Don't clear caches - keep last-good data, let 10-minute rule decide
         noStopsRendered = false;
         offlineRendered = false;
         connectingRendered = false;
@@ -432,11 +441,6 @@ void onLinkState(WifiLinkState next) {
     } else if (lastLinkState == WifiLinkState::Connected) {
         configServerStopMdns();
         timeSynced = false;
-        // Invalidate all stop caches when WiFi disconnects
-        for (StopCache& cache : stopCaches) {
-            cache.valid = false;
-            cache.rows.clear();
-        }
         offlineRendered = false;
     }
     if (next != WifiLinkState::ApFallback) {
