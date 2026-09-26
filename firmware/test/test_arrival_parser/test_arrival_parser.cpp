@@ -472,6 +472,32 @@ void test_rows_keyed_by_service_and_label_merge_visits() {
     TEST_ASSERT_TRUE(result.rows[0].arrivals[0].etaEpoch < result.rows[0].arrivals[1].etaEpoch);
 }
 
+void test_empty_label_merges_into_single_non_empty_label() {
+    // Empty-label arrivals should merge into the single non-empty label row
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "186",
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:40:00+08:00", "Label": ""},
+          "NextBus2": {"EstimatedArrival": "2026-09-26T16:50:00+08:00", "Label": "To Shenton Way Ter"},
+          "NextBus3": {"EstimatedArrival": "2026-09-26T17:00:00+08:00", "Label": ""}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    // Should have 1 row (empty labels merged into the single non-empty label)
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    TEST_ASSERT_EQUAL_STRING("186", result.rows[0].serviceNo.c_str());
+    // All three arrivals should be merged and sorted by time
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[0].etaEpoch > 0);
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[1].etaEpoch > 0);
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[2].etaEpoch > 0);
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[0].etaEpoch < result.rows[0].arrivals[1].etaEpoch);
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[1].etaEpoch < result.rows[0].arrivals[2].etaEpoch);
+}
+
 void setup() {}
 void loop() {}
 
@@ -508,5 +534,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_v2_empty_services_array);
     RUN_TEST(test_loop_visit_1_rows_before_visit_2);
     RUN_TEST(test_rows_keyed_by_service_and_label_merge_visits);
+    RUN_TEST(test_empty_label_merges_into_single_non_empty_label);
     return UNITY_END();
 }

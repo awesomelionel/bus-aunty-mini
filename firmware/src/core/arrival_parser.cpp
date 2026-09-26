@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string>
 
 #include "core/iso8601.h"
@@ -236,6 +237,72 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
             rows.push_back(row);
         }
     }
+    
+    // For each service, find distinct non-empty labels and collect all arrivals
+    std::map<std::string, std::set<std::string>> serviceLabels;
+    std::map<std::string, std::vector<BusArrival>> serviceEmptyLabelArrivals;
+    
+    for (const BusServiceRow& row : rows) {
+        if (!row.label.empty()) {
+            serviceLabels[row.serviceNo].insert(row.label);
+        } else {
+            // Collect arrivals from empty-label rows
+            for (const BusArrival& arr : row.arrivals) {
+                if (arr.etaEpoch >= 0) {
+                    serviceEmptyLabelArrivals[row.serviceNo].push_back(arr);
+                }
+            }
+        }
+    }
+    
+    // Identify services where empty-label arrivals should be merged
+    std::set<std::string> servicesToMerge;
+    for (const auto& pair : serviceLabels) {
+        if (pair.second.size() == 1 && serviceEmptyLabelArrivals.count(pair.first)) {
+            servicesToMerge.insert(pair.first);
+        }
+    }
+    
+    // Build final row list, merging empty-label arrivals where needed
+    std::vector<BusServiceRow> mergedRows;
+    for (BusServiceRow& row : rows) {
+        const std::string& svc = row.serviceNo;
+        
+        // Skip empty-label rows that will be merged
+        if (row.label.empty() && servicesToMerge.count(svc)) {
+            continue;
+        }
+        
+        // If this is the labeled row for a service that needs merging, merge now
+        if (!row.label.empty() && servicesToMerge.count(svc)) {
+            // Collect all arrivals (existing + empty-label ones)
+            std::vector<BusArrival> allArrivals;
+            for (const BusArrival& arr : row.arrivals) {
+                if (arr.etaEpoch >= 0) {
+                    allArrivals.push_back(arr);
+                }
+            }
+            for (const BusArrival& arr : serviceEmptyLabelArrivals[svc]) {
+                allArrivals.push_back(arr);
+            }
+            // Sort by ETA
+            std::sort(allArrivals.begin(), allArrivals.end(),
+                      [](const BusArrival& a, const BusArrival& b) {
+                          return a.etaEpoch < b.etaEpoch;
+                      });
+            // Copy back
+            for (size_t i = 0; i < kArrivalsPerService; ++i) {
+                if (i < allArrivals.size()) {
+                    row.arrivals[i] = allArrivals[i];
+                } else {
+                    row.arrivals[i] = BusArrival{};
+                }
+            }
+        }
+        
+        mergedRows.push_back(row);
+    }
+    rows = mergedRows;
     
     // Determine which services have multiple directions at this stop
     // A service needs a label if: (1) it appears in multiple rows, OR (2) it's a loop
