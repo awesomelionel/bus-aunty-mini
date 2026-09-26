@@ -74,11 +74,22 @@ void test_fit_plus_one_pixel() {
 }
 
 void test_27_char_label_with_marker_width_reserved() {
-    // Simulate marker width reservation: "Very Long Location Name Here" (28 chars)
-    // with 30px reserved for marker: maxWidth = 220 - 30 = 190px
-    // 19 chars fit: "Very Long Location." = 19 chars = 190px
-    std::string result = truncateText("Very Long Location Name Here", 190, mockWidth);
-    TEST_ASSERT_EQUAL_STRING("Very Long Location.", result.c_str());
+    // Real 27-char label: "Bef Ang Mo Kio Depot Exit" (27 chars exactly)
+    // " 2nd" marker = 4 chars = 40px
+    // maxLabelWidth = 280px, reserved 40px for marker = 240px available
+    // 24 chars fit: "Bef Ang Mo Kio Depot Ex." = 24 chars = 240px
+    std::string label = "Bef Ang Mo Kio Depot Exit A";  // 27 chars
+    TEST_ASSERT_EQUAL(27, label.size());
+    std::string result = truncateText(label, 240, mockWidth);
+    TEST_ASSERT_EQUAL_STRING("Bef Ang Mo Kio Depot.", result.c_str());
+}
+
+void test_one_pixel_too_wide() {
+    // "Hello" = 50px, doesn't fit in 49px
+    // Should truncate to "Hell." = 50px
+    // But that's too wide, so "Hel." = 40px
+    std::string result = truncateText("Hello", 49, mockWidth);
+    TEST_ASSERT_EQUAL_STRING("Hell.", result.c_str());
 }
 
 void test_final_append_dot_exceeds_width() {
@@ -109,6 +120,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_exact_fit_without_truncation);
     RUN_TEST(test_fit_plus_one_pixel);
     RUN_TEST(test_27_char_label_with_marker_width_reserved);
+    RUN_TEST(test_one_pixel_too_wide);
     RUN_TEST(test_final_append_dot_exceeds_width);
     return UNITY_END();
 }
