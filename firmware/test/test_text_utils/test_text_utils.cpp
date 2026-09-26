@@ -86,10 +86,9 @@ void test_27_char_label_with_marker_width_reserved() {
 
 void test_one_pixel_too_wide() {
     // "Hello" = 50px, doesn't fit in 49px
-    // Should truncate to "Hell." = 50px
-    // But that's too wide, so "Hel." = 40px
+    // Hard-cuts to "Hel." = 40px (next shorter that fits)
     std::string result = truncateText("Hello", 49, mockWidth);
-    TEST_ASSERT_EQUAL_STRING("Hell.", result.c_str());
+    TEST_ASSERT_EQUAL_STRING("Hel.", result.c_str());
 }
 
 void test_final_append_dot_exceeds_width() {
