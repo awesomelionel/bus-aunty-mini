@@ -460,33 +460,14 @@ void drawFramedArrivals(const std::string& stopLabel,
     canvas.setTextDatum(top_left);
     canvas.setTextColor(p.capInk);
     
-    // Build title with age indicator, truncated to end before buttons (x=276)
-    constexpr int kTitleMaxX = 276;
+    // Build title with intelligent truncation using core buildHeader
+    // Reserve space for bold (+1px) and end before first button (x=276)
     constexpr int kTitleStartX = 4;
-    int titleMaxWidth = kTitleMaxX - kTitleStartX;
+    constexpr int kTitleMaxWidth = 268;  // 276 - 4 - bold margin, keeps age
     
-    std::string title = stopLabel + "  " +
-                       std::to_string(currentStopIndex + 1) + " of " +
-                       std::to_string(totalStops);
-    
-    // Append age if data is stale (> 60s)
-    if (dataAgeMs > 60000) {
-        uint32_t ageSec = dataAgeMs / 1000;
-        char ageBuf[16];
-        if (ageSec < 120) {
-            std::snprintf(ageBuf, sizeof(ageBuf), " %us", static_cast<unsigned>(ageSec));
-        } else {
-            std::snprintf(ageBuf, sizeof(ageBuf), " %um", static_cast<unsigned>(ageSec / 60));
-        }
-        title += ageBuf;
-    }
-    
-    // Truncate title if needed
-    if (canvas.textWidth(title.c_str()) > titleMaxWidth) {
-        title = truncateText(title, titleMaxWidth, [](const char* s) {
-            return canvas.textWidth(s);
-        });
-    }
+    std::string title = buildHeader(stopLabel, currentStopIndex, totalStops,
+                                   dataAgeMs, kTitleMaxWidth,
+                                   [](const char* s) { return canvas.textWidth(s); });
     
     drawBoldString(title.c_str(), kTitleStartX, 3, /*growLeft=*/false);
 

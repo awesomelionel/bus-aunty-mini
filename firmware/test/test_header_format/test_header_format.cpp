@@ -65,6 +65,23 @@ void test_extremely_narrow_width() {
     TEST_ASSERT_EQUAL_STRING("Ve.", result.c_str());
 }
 
+void test_win95_title_keeps_age() {
+    // Win95 title: 16-char name + "  4 of 4" + age
+    // Max width 268px, age " 3m" = 30px, leaves 238px for name + indicator
+    // Full would be: "WWWWWWWWWWWWWWWW  4 of 4 3m" = 29 chars = 290px
+    // Should drop page indicator, trim name: "WWWWWWWWW. 3m" or similar
+    std::string result = buildHeader("WWWWWWWWWWWWWWWW", 3, 4, 180000, 268, mockWidth);
+    
+    // Must contain " 3m" (age)
+    TEST_ASSERT_TRUE(result.find(" 3m") != std::string::npos);
+    
+    // Must NOT contain "4 of 4" (page indicator dropped)
+    TEST_ASSERT_TRUE(result.find("4 of 4") == std::string::npos);
+    
+    // Total width must fit in 268px
+    TEST_ASSERT_TRUE(mockWidth(result.c_str()) <= 268);
+}
+
 void setup() {}
 void loop() {}
 
@@ -78,5 +95,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_age_in_seconds);
     RUN_TEST(test_age_in_minutes);
     RUN_TEST(test_extremely_narrow_width);
+    RUN_TEST(test_win95_title_keeps_age);
     return UNITY_END();
 }
