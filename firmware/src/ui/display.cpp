@@ -524,14 +524,20 @@ void drawFramedArrivals(const std::string& stopLabel,
             const int maxLabelWidth = screenWidth() - labelX - 8;
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Check if this row has any visit-2 arrivals to determine marker reservation
+            // Show marker only when ALL non-empty arrivals are visit 2
             bool hasVisit2 = false;
+            bool hasNonEmptyArrival = false;
+            bool allNonEmptyAreVisit2 = true;
             for (size_t col = 0; col < kArrivalsPerService; ++col) {
-                if (row.arrivals[col].visitNumber == "2" && row.arrivals[col].etaEpoch >= 0) {
-                    hasVisit2 = true;
-                    break;
+                if (row.arrivals[col].etaEpoch >= 0) {
+                    hasNonEmptyArrival = true;
+                    if (row.arrivals[col].visitNumber != "2") {
+                        allNonEmptyAreVisit2 = false;
+                        break;
+                    }
                 }
             }
+            hasVisit2 = hasNonEmptyArrival && allNonEmptyAreVisit2;
 #else
             bool hasVisit2 = false;
 #endif
@@ -881,14 +887,20 @@ void displayShowArrivals(const std::string& stopLabel,
                                       (board().arrivalsFontHeight >= 24 ? 8 : 8);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Check if this row has any visit-2 arrivals to determine marker reservation
+            // Show marker only when ALL non-empty arrivals are visit 2
             bool hasVisit2 = false;
+            bool hasNonEmptyArrival = false;
+            bool allNonEmptyAreVisit2 = true;
             for (size_t col = 0; col < kArrivalsPerService; ++col) {
-                if (row.arrivals[col].visitNumber == "2" && row.arrivals[col].etaEpoch >= 0) {
-                    hasVisit2 = true;
-                    break;
+                if (row.arrivals[col].etaEpoch >= 0) {
+                    hasNonEmptyArrival = true;
+                    if (row.arrivals[col].visitNumber != "2") {
+                        allNonEmptyAreVisit2 = false;
+                        break;
+                    }
                 }
             }
+            hasVisit2 = hasNonEmptyArrival && allNonEmptyAreVisit2;
 #else
             bool hasVisit2 = false;
 #endif
