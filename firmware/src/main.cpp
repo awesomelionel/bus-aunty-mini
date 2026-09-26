@@ -4,6 +4,7 @@
 #include <esp_system.h>
 #include <time.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -52,7 +53,6 @@ bool alwaysOnDirty = false;
 bool win95ThemeDirty = false;
 size_t currentStopIndex = 0;
 uint32_t lastPollMillis = 0;
-uint32_t lastSuccessfulPollMillis = 0;
 size_t backoffStep = 0;
 bool needsImmediateFetch = true;
 bool noStopsRendered = false;
@@ -66,8 +66,16 @@ uint32_t lastInteractionMillis = 0;
 uint32_t ignoreSleepClickUntilMs = 0;
 PowerMode powerMode = PowerMode::Awake;
 
-std::vector<BusServiceRow> cachedRows;
-std::string cachedLabel;
+// Per-stop cache: stores rows and fetch time for each configured stop
+struct StopCache {
+    std::string stopCode;
+    std::vector<BusServiceRow> rows;
+    std::string label;
+    uint32_t fetchedAtMillis = 0;
+    bool valid = false;
+};
+std::array<StopCache, kMaxBusStops> stopCaches;
+
 size_t currentPage = 0;
 
 void noteInteraction() { lastInteractionMillis = millis(); }
@@ -118,7 +126,11 @@ void persistDirtySettings() {
         // the old five-row screen can point past the end of a four-row one.
         displaySetTheme(win95Theme);
         currentPage = 0;
-        cachedRows.clear();
+        // Invalidate all stop caches
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+        }
         needsImmediateFetch = wifiLinkConnected();
     }
     if (networksDirty) {
@@ -158,8 +170,8 @@ void syncTime() {
     timeSynced = now >= 1700000000;
 }
 
-bool cachedRowsHaveLabels() {
-    for (const BusServiceRow& row : cachedRows) {
+bool cachedRowsHaveLabels(const std::vector<BusServiceRow>& rows) {
+    for (const BusServiceRow& row : rows) {
         if (!row.label.empty()) {
             return true;
         }
@@ -168,32 +180,44 @@ bool cachedRowsHaveLabels() {
 }
 
 void renderCachedPage() {
-    bool hasLabels = cachedRowsHaveLabels();
-    size_t totalPages =
-        servicePageCount(cachedRows.size(), servicesPerScreen(hasLabels));
-    std::vector<BusServiceRow> page =
-        selectServicePage(cachedRows, servicesPerScreen(hasLabels), currentPage);
-    
-    // Calculate data age for stale indicator
-    uint32_t dataAgeMs = 0;
-    if (lastSuccessfulPollMillis > 0) {
-        uint32_t now = millis();
-        if (now >= lastSuccessfulPollMillis) {
-            dataAgeMs = now - lastSuccessfulPollMillis;
-        }
+    if (currentStopIndex >= kMaxBusStops) {
+        return;
     }
     
-    displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
+    StopCache& cache = stopCaches[currentStopIndex];
+    if (!cache.valid) {
+        return;
+    }
+    
+    bool hasLabels = cachedRowsHaveLabels(cache.rows);
+    size_t totalPages =
+        servicePageCount(cache.rows.size(), servicesPerScreen(hasLabels));
+    std::vector<BusServiceRow> page =
+        selectServicePage(cache.rows, servicesPerScreen(hasLabels), currentPage);
+    
+    // Calculate data age (wrap-safe: unsigned subtraction wraps correctly)
+    uint32_t dataAgeMs = millis() - cache.fetchedAtMillis;
+    
+    displayShowArrivals(cache.label, page, time(nullptr), currentStopIndex,
                          busStops.size(), currentPage, totalPages,
                          hal::powerStatus(), dataAgeMs);
 }
 
 void pollAndRender() {
+    if (currentStopIndex >= busStops.size() || currentStopIndex >= kMaxBusStops) {
+        return;
+    }
+    
     const BusStopConfig& stop = busStops[currentStopIndex];
     const std::string& label = busStopLabel(stop);
+    StopCache& cache = stopCaches[currentStopIndex];
     
-    // Only show "Loading..." on first fetch or stop change, not on routine polls
-    if (cachedRows.empty()) {
+    // Check if we have valid cache data < 10 minutes old
+    bool haveFreshCache = cache.valid && 
+                          (millis() - cache.fetchedAtMillis) < kStaleDataThresholdMs;
+    
+    // Only show "Loading..." on first fetch or stop change
+    if (!cache.valid) {
         displayShowStatus("Loading " + label + "...");
     }
 
@@ -204,9 +228,9 @@ void pollAndRender() {
     // Handle errors with backoff
     if (!fetch.ok) {
         if (fetch.httpStatus == 404) {
-            // 404 is not a backend error - show "No data" and don't cache
-            cachedRows.clear();
-            cachedLabel.clear();
+            // 404 is not a backend error - clear cache, show "No data"
+            cache.valid = false;
+            cache.rows.clear();
             displayShowStatus("No data for " + label);
             backoffStep = 0;  // Reset backoff
             return;
@@ -216,8 +240,8 @@ void pollAndRender() {
         if (backoffStep < kMaxBackoffStep) {
             ++backoffStep;
         }
-        // Keep rendering cached data if we have it
-        if (!cachedRows.empty()) {
+        // Fall back to stale cache if < 10 minutes old
+        if (haveFreshCache) {
             renderCachedPage();
         } else {
             displayShowStatus(std::string("Fetch failed (") +
@@ -228,11 +252,11 @@ void pollAndRender() {
 
     ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
     if (!parsed.valid) {
-        // Parse error - increment backoff, keep cached data
+        // Parse error - increment backoff, fall back to cache
         if (backoffStep < kMaxBackoffStep) {
             ++backoffStep;
         }
-        if (!cachedRows.empty()) {
+        if (haveFreshCache) {
             renderCachedPage();
         } else {
             displayShowStatus("Bad response for " + label);
@@ -242,32 +266,48 @@ void pollAndRender() {
     
     if (parsed.rows.empty()) {
         // Empty services is not an error state
-        cachedRows.clear();
-        cachedLabel = label;
+        cache.rows.clear();
+        cache.label = label;
+        cache.fetchedAtMillis = millis();
+        cache.valid = true;
         displayShowStatus(label + ": no services");
         backoffStep = 0;
-        lastSuccessfulPollMillis = millis();
         return;
     }
 
     // Success - update cache, reset backoff
-    cachedRows = parsed.rows;
-    cachedLabel = label;
+    cache.stopCode = stop.code;
+    cache.rows = parsed.rows;
+    cache.label = label;
+    cache.fetchedAtMillis = millis();
+    cache.valid = true;
     backoffStep = 0;
-    lastSuccessfulPollMillis = millis();
     
-    bool hasLabels = cachedRowsHaveLabels();
+    bool hasLabels = cachedRowsHaveLabels(cache.rows);
     if (currentPage >=
-        servicePageCount(cachedRows.size(), servicesPerScreen(hasLabels))) {
+        servicePageCount(cache.rows.size(), servicesPerScreen(hasLabels))) {
         currentPage = 0;
     }
     renderCachedPage();
 }
 
 void stepForward() {
-    bool hasLabels = cachedRowsHaveLabels();
+    if (currentStopIndex >= kMaxBusStops) {
+        return;
+    }
+    
+    StopCache& cache = stopCaches[currentStopIndex];
+    if (!cache.valid) {
+        // No cache yet, move to next stop
+        currentPage = 0;
+        currentStopIndex = (currentStopIndex + 1) % busStops.size();
+        needsImmediateFetch = true;
+        return;
+    }
+    
+    bool hasLabels = cachedRowsHaveLabels(cache.rows);
     size_t totalPages =
-        servicePageCount(cachedRows.size(), servicesPerScreen(hasLabels));
+        servicePageCount(cache.rows.size(), servicesPerScreen(hasLabels));
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();
@@ -307,7 +347,11 @@ void enterSleep() {
 
     wifiLinkOnWake();
 
-    cachedRows.clear();
+    // Invalidate all stop caches after sleep
+    for (StopCache& cache : stopCaches) {
+        cache.valid = false;
+        cache.rows.clear();
+    }
     currentPage = 0;
     noStopsRendered = false;
     offlineRendered = false;
@@ -373,7 +417,11 @@ void onLinkState(WifiLinkState next) {
         if (!timeSynced) {
             syncTime();
         }
-        cachedRows.clear();
+        // Invalidate all stop caches when WiFi connects
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+        }
         currentPage = 0;
         noStopsRendered = false;
         offlineRendered = false;
@@ -384,7 +432,11 @@ void onLinkState(WifiLinkState next) {
     } else if (lastLinkState == WifiLinkState::Connected) {
         configServerStopMdns();
         timeSynced = false;
-        cachedRows.clear();
+        // Invalidate all stop caches when WiFi disconnects
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+        }
         offlineRendered = false;
     }
     if (next != WifiLinkState::ApFallback) {
