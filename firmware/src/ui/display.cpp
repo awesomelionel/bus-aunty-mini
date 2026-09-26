@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <vector>
 
+#include "config.h"
 #include "board/board.h"
 #include "core/eta_format.h"
 #include "core/header_format.h"
