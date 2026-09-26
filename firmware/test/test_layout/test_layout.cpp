@@ -139,6 +139,28 @@ void test_a_zero_row_height_does_not_divide_by_zero() {
                .servicesPerScreen);
 }
 
+void test_win95_layout_320x170_three_rows() {
+    // TDisplay S3 with Win95 theme: 320x170, DejaVu24 (h=25), two-line pitch=34
+    // Chrome height: 18 (title) + 16 (column header) + 16 (status) + 4 (margins) = 54
+    // List height: 170 - 54 = 116
+    // With row height 34: 116 / 34 = 3.4 -> 3 rows per page
+    // The layout function is passed listHeight + rowHeight because it reserves first row for header
+    // In Win95 mode, we pass listHeight + rowHeight to get the right count
+    constexpr int kWin95Width = 320;
+    constexpr int kWin95Height = 170;
+    constexpr int kWin95RowHeight = 34;  // Two-line pitch for DejaVu24
+    constexpr int kWin95ChromeHeight = 54;  // Title bar + column header + status bar + margins
+    constexpr int kWin95ListHeight = kWin95Height - kWin95ChromeHeight;
+    
+    // Pass listHeight + rowHeight because computeArrivalsLayout reserves first row for header
+    ArrivalsLayout layout = computeArrivalsLayout(
+        kWin95Width, kWin95ListHeight + kWin95RowHeight, kWin95RowHeight,
+        0, true);  // battery=0 for Win95, hasLabels=true
+    
+    TEST_ASSERT_EQUAL_size_t(3, layout.servicesPerScreen);
+    TEST_ASSERT_EQUAL_INT(kWin95RowHeight, layout.rowHeight);
+}
+
 void setup() {}
 void loop() {}
 
@@ -156,5 +178,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_a_row_taller_than_the_screen_fits_nothing);
     RUN_TEST(test_a_screen_one_row_tall_fits_nothing);
     RUN_TEST(test_a_zero_row_height_does_not_divide_by_zero);
+    RUN_TEST(test_win95_layout_320x170_three_rows);
     return UNITY_END();
 }
