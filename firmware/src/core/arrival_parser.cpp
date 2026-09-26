@@ -136,16 +136,14 @@ std::string stripToPrefix(const std::string& label) {
 std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services) {
     std::vector<BusServiceRow> rows;
     
-    // First, collect all unique (serviceNo, label) pairs with their arrivals
+    // Key rows by (serviceNo, label) only - merge arrivals from both visit numbers
     struct RowKey {
         std::string serviceNo;
         std::string label;
         bool isLoop;
-        int sortOrder;  // For loop services: VisitNumber "1" before "2"
         
         bool operator<(const RowKey& other) const {
             if (serviceNo != other.serviceNo) return serviceNo < other.serviceNo;
-            if (sortOrder != other.sortOrder) return sortOrder < other.sortOrder;
             return label < other.label;
         }
         bool operator==(const RowKey& other) const {
@@ -153,10 +151,24 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
         }
     };
     
-    std::map<RowKey, std::vector<BusArrival>> rowArrivals;
-    std::vector<RowKey> rowOrder;  // Preserve API order
+    struct RowData {
+        std::vector<BusArrival> arrivals;
+        bool isLoop = false;
+        int firstSeenVisit = 0;  // Track whether visit "1" or "2" was seen first
+        size_t firstSeenIndex = 0;  // Track order within service
+    };
+    
+    std::map<RowKey, RowData> rowData;
+    std::vector<std::string> serviceOrder;  // Track service order from API
+    std::map<std::string, size_t> serviceRowIndex;  // Track row index within service
     
     for (const BusService& svc : services) {
+        // Track first-seen service order
+        if (std::find(serviceOrder.begin(), serviceOrder.end(), svc.serviceNo) == serviceOrder.end()) {
+            serviceOrder.push_back(svc.serviceNo);
+            serviceRowIndex[svc.serviceNo] = 0;
+        }
+        
         for (size_t i = 0; i < kArrivalsPerService; ++i) {
             const BusArrival& arr = svc.arrivals[i];
             if (arr.etaEpoch < 0) {
@@ -164,46 +176,65 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
             }
             
             std::string label = stripToPrefix(svc.labels[i]);
+            RowKey key{svc.serviceNo, label, svc.isLoop};
             
-            // Determine sort order for loops: VisitNumber "1" before "2"
-            int sortOrder = 0;
-            if (svc.isLoop && arr.visitNumber == "2") {
-                sortOrder = 1;
+            if (rowData.find(key) == rowData.end()) {
+                // First time seeing this (service, label) pair
+                rowData[key].isLoop = svc.isLoop;
+                rowData[key].firstSeenIndex = serviceRowIndex[svc.serviceNo]++;
+                // Track whether visit "1" or "2" appeared first
+                rowData[key].firstSeenVisit = (arr.visitNumber == "2") ? 2 : 1;
             }
-            
-            RowKey key{svc.serviceNo, label, svc.isLoop, sortOrder};
-            
-            if (rowArrivals.find(key) == rowArrivals.end()) {
-                rowOrder.push_back(key);
-            }
-            rowArrivals[key].push_back(arr);
+            rowData[key].arrivals.push_back(arr);
         }
     }
     
-    // Now create rows in API order, sorting arrivals by ETA within each row
-    for (const RowKey& key : rowOrder) {
-        BusServiceRow row;
-        row.serviceNo = key.serviceNo;
-        row.label = key.label;
-        row.isLoop = key.isLoop;
+    // Build rows: services in API order, within each service visit-1 rows before visit-2 rows,
+    // preserving first-seen order within each visit number
+    for (const std::string& serviceNo : serviceOrder) {
+        std::vector<std::pair<RowKey, RowData*>> serviceRows;
+        for (auto& pair : rowData) {
+            if (pair.first.serviceNo == serviceNo) {
+                serviceRows.push_back({pair.first, &pair.second});
+            }
+        }
         
-        // Sort arrivals by ETA
-        std::vector<BusArrival>& arrs = rowArrivals[key];
-        std::sort(arrs.begin(), arrs.end(),
-                  [](const BusArrival& a, const BusArrival& b) {
-                      return a.etaEpoch < b.etaEpoch;
+        // Sort: visit-1 rows (firstSeenVisit==1) before visit-2 rows (firstSeenVisit==2),
+        // then by firstSeenIndex to preserve API order
+        std::sort(serviceRows.begin(), serviceRows.end(),
+                  [](const std::pair<RowKey, RowData*>& a, const std::pair<RowKey, RowData*>& b) {
+                      if (a.second->firstSeenVisit != b.second->firstSeenVisit) {
+                          return a.second->firstSeenVisit < b.second->firstSeenVisit;
+                      }
+                      return a.second->firstSeenIndex < b.second->firstSeenIndex;
                   });
         
-        // Copy up to kArrivalsPerService arrivals
-        for (size_t i = 0; i < arrs.size() && i < kArrivalsPerService; ++i) {
-            row.arrivals[i] = arrs[i];
+        for (const auto& pair : serviceRows) {
+            const RowKey& key = pair.first;
+            RowData* data = pair.second;
+            
+            BusServiceRow row;
+            row.serviceNo = key.serviceNo;
+            row.label = key.label;
+            row.isLoop = data->isLoop;
+            
+            // Sort arrivals by ETA
+            std::sort(data->arrivals.begin(), data->arrivals.end(),
+                      [](const BusArrival& a, const BusArrival& b) {
+                          return a.etaEpoch < b.etaEpoch;
+                      });
+            
+            // Copy up to kArrivalsPerService arrivals
+            for (size_t i = 0; i < data->arrivals.size() && i < kArrivalsPerService; ++i) {
+                row.arrivals[i] = data->arrivals[i];
+            }
+            // Fill remaining slots with empty arrivals
+            for (size_t i = data->arrivals.size(); i < kArrivalsPerService; ++i) {
+                row.arrivals[i] = BusArrival{};
+            }
+            
+            rows.push_back(row);
         }
-        // Fill remaining slots with empty arrivals
-        for (size_t i = arrs.size(); i < kArrivalsPerService; ++i) {
-            row.arrivals[i] = BusArrival{};
-        }
-        
-        rows.push_back(row);
     }
     
     // Determine which services have multiple directions at this stop

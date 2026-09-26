@@ -407,6 +407,71 @@ void test_v2_empty_services_array() {
     TEST_ASSERT_EQUAL(0, result.rows.size());
 }
 
+void test_loop_visit_1_rows_before_visit_2() {
+    // Service 125 at stop 52109: NextBus is visit 2, later arrivals are visit 1
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [
+          {
+            "ServiceNo": "125",
+            "Loop": {"IsLoop": true},
+            "NextBus": {"EstimatedArrival": "2026-09-26T16:41:00+08:00", "Label": "To St. Michael's Ter", "VisitNumber": "2"},
+            "NextBus2": {"EstimatedArrival": "2026-09-26T16:56:00+08:00", "Label": "To Sims", "VisitNumber": "1"}
+          },
+          {
+            "ServiceNo": "131",
+            "Loop": {"IsLoop": true},
+            "NextBus": {"EstimatedArrival": "2026-09-26T16:42:00+08:00", "Label": "To St. Michael's Ter", "VisitNumber": "2"},
+            "NextBus2": {"EstimatedArrival": "2026-09-26T16:48:00+08:00", "Label": "To Bt Merah Int", "VisitNumber": "1"}
+          }
+        ]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(4, result.rows.size());
+    
+    // Service 125: visit-1 row (Sims) should come before visit-2 row (St. Michael's Ter)
+    TEST_ASSERT_EQUAL_STRING("125", result.rows[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("Sims", result.rows[0].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("125", result.rows[1].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[1].label.c_str());
+    
+    // Service 131: visit-1 row (Bt Merah Int) should come before visit-2 row (St. Michael's Ter)
+    TEST_ASSERT_EQUAL_STRING("131", result.rows[2].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("Bt Merah Int", result.rows[2].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("131", result.rows[3].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[3].label.c_str());
+}
+
+void test_rows_keyed_by_service_and_label_merge_visits() {
+    // Same label from different visits should merge into one row
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [
+          {
+            "ServiceNo": "125",
+            "Loop": {"IsLoop": true},
+            "NextBus": {"EstimatedArrival": "2026-09-26T16:41:00+08:00", "Label": "To Sims", "VisitNumber": "1"},
+            "NextBus2": {"EstimatedArrival": "2026-09-26T16:51:00+08:00", "Label": "To Sims", "VisitNumber": "2"}
+          }
+        ]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    // Should have 1 row, not 2 (both visits merged because same label)
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    TEST_ASSERT_EQUAL_STRING("125", result.rows[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("Sims", result.rows[0].label.c_str());
+    // Both arrivals should be in the row, sorted by time
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[0].etaEpoch > 0);
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[1].etaEpoch > 0);
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[0].etaEpoch < result.rows[0].arrivals[1].etaEpoch);
+}
+
 void setup() {}
 void loop() {}
 
@@ -441,5 +506,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_flatten_clears_labels_for_single_direction_services);
     RUN_TEST(test_flatten_keeps_labels_for_loops);
     RUN_TEST(test_v2_empty_services_array);
+    RUN_TEST(test_loop_visit_1_rows_before_visit_2);
+    RUN_TEST(test_rows_keyed_by_service_and_label_merge_visits);
     return UNITY_END();
 }
