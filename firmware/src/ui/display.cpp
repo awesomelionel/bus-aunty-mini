@@ -542,10 +542,12 @@ void drawFramedArrivals(const std::string& stopLabel,
             canvas.drawString(truncated.c_str(), labelX, labelY);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals in dim color
+            // Add "2nd" marker for second-visit arrivals
+            // Navy for day palette, cyan for night (higher contrast)
             if (hasVisit2) {
                 int markerX = labelX + canvas.textWidth(truncated.c_str());
-                canvas.setTextColor(p.dim);
+                uint32_t markerColor = (p.capA == 0x000080) ? 0x000080 : TFT_CYAN;
+                canvas.setTextColor(markerColor);
                 canvas.drawString(" 2nd", markerX, labelY);
                 canvas.setTextColor(p.ink);  // Restore color
             }
@@ -896,10 +898,10 @@ void displayShowArrivals(const std::string& stopLabel,
             canvas.drawString(truncated.c_str(), labelX, labelY);
             
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals in grey to distinguish from label
+            // Add "2nd" marker for second-visit arrivals in cyan to distinguish from label
             if (hasVisit2) {
                 int markerX = labelX + canvas.textWidth(truncated.c_str());
-                canvas.setTextColor(TFT_DARKGREY, TFT_BLACK);
+                canvas.setTextColor(TFT_CYAN, TFT_BLACK);
                 canvas.drawString(" 2nd", markerX, labelY);
                 canvas.setTextColor(TFT_WHITE, TFT_BLACK);  // Restore color
             }
