@@ -294,6 +294,7 @@ void pollAndRender() {
     
     if (parsed.rows.empty()) {
         // Empty services is not an error state
+        cache.stopCode = stop.code;
         cache.rows.clear();
         cache.label = label;
         cache.fetchedAtMillis = millis();
