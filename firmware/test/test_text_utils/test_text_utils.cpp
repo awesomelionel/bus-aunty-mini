@@ -74,13 +74,15 @@ void test_fit_plus_one_pixel() {
 }
 
 void test_27_char_label_with_marker_width_reserved() {
-    // Real 27-char label: "Bef Ang Mo Kio Depot Exit" (27 chars exactly)
-    // " 2nd" marker = 4 chars = 40px
-    // maxLabelWidth = 280px, reserved 40px for marker = 240px available
-    // 24 chars fit: "Bef Ang Mo Kio Depot Ex." = 24 chars = 240px
+    // Real 27-char label: "Bef Ang Mo Kio Depot Exit A" (27 chars exactly)
+    // maxLabelWidth = 280px, reserve marker width
+    int markerWidth = mockWidth(" 2nd");  // 4 chars = 40px
+    int availableWidth = 280 - markerWidth;  // 280 - 40 = 240px
+    
     std::string label = "Bef Ang Mo Kio Depot Exit A";  // 27 chars
     TEST_ASSERT_EQUAL(27, label.size());
-    std::string result = truncateText(label, 240, mockWidth);
+    std::string result = truncateText(label, availableWidth, mockWidth);
+    // "Bef Ang Mo Kio Depot." = 21 chars = 210px, fits in 240px
     TEST_ASSERT_EQUAL_STRING("Bef Ang Mo Kio Depot.", result.c_str());
 }
 
