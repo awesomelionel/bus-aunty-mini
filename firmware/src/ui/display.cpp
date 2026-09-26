@@ -8,6 +8,7 @@
 #include "core/eta_format.h"
 #include "core/layout.h"
 #include "core/night_window.h"
+#include "core/text_utils.h"
 #include "hal/display_device.h"
 #include "ui/wifi_image.h"
 
@@ -42,8 +43,7 @@ const lgfx::GFXfont* labelFont() {
                                             : &fonts::DejaVu9;
 }
 
-// Truncate text to fit within maxWidth pixels, cutting at word boundaries.
-// Appends "." if truncated. ASCII only (0x20-0x7E).
+// Wrapper for truncateText that handles font setup and visit marker reservation.
 // When BUS_AUNTY_SHOW_VISIT_MARKER is enabled, reserves space for " 2nd" marker.
 std::string truncateLabel(const std::string& text, int maxWidth,
                           const lgfx::GFXfont* font) {
@@ -51,9 +51,10 @@ std::string truncateLabel(const std::string& text, int maxWidth,
         return text;
     }
     
+    canvas.setFont(font);
+    
     // Reserve space for " 2nd" marker when flag is enabled
 #if BUS_AUNTY_SHOW_VISIT_MARKER
-    canvas.setFont(font);
     int markerWidth = canvas.textWidth(" 2nd");
     maxWidth -= markerWidth;
     if (maxWidth < 10) {  // Sanity check
@@ -61,51 +62,10 @@ std::string truncateLabel(const std::string& text, int maxWidth,
     }
 #endif
     
-    // Clean non-ASCII bytes (replace with '?')
-    std::string cleaned;
-    for (char c : text) {
-        if (static_cast<unsigned char>(c) >= 0x20 &&
-            static_cast<unsigned char>(c) <= 0x7E) {
-            cleaned += c;
-        } else {
-            cleaned += '?';
-        }
-    }
-    
-    canvas.setFont(font);
-    if (canvas.textWidth(cleaned.c_str()) <= maxWidth) {
-        return cleaned;
-    }
-    
-    // Try cutting at word boundaries
-    size_t lastSpace = 0;
-    for (size_t i = 0; i < cleaned.size(); ++i) {
-        if (cleaned[i] == ' ') {
-            std::string candidate = cleaned.substr(0, i) + ".";
-            if (canvas.textWidth(candidate.c_str()) <= maxWidth) {
-                lastSpace = i;
-            } else {
-                break;
-            }
-        }
-    }
-    
-    if (lastSpace > 0) {
-        return cleaned.substr(0, lastSpace) + ".";
-    }
-    
-    // Hard cut if one word is too long
-    for (size_t i = 1; i < cleaned.size(); ++i) {
-        std::string candidate = cleaned.substr(0, i) + ".";
-        if (canvas.textWidth(candidate.c_str()) > maxWidth) {
-            if (i > 1) {
-                return cleaned.substr(0, i - 1) + ".";
-            }
-            return ".";
-        }
-    }
-    
-    return cleaned + ".";
+    // Use core truncation with canvas width callback
+    return truncateText(text, maxWidth, [](const char* s) {
+        return canvas.textWidth(s);
+    });
 }
 
 // A solid triangle of `size` pixels across, centred on the point given. This
