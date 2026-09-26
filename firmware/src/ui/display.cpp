@@ -35,6 +35,67 @@ const lgfx::GFXfont* arrivalsFont() {
                                             : &fonts::DejaVu18;
 }
 
+// Label font: DejaVu9 for small boards, DejaVu12 for larger boards.
+const lgfx::GFXfont* labelFont() {
+    return board().arrivalsFontHeight >= 24 ? &fonts::DejaVu12
+                                            : &fonts::DejaVu9;
+}
+
+// Truncate text to fit within maxWidth pixels, cutting at word boundaries.
+// Appends "." if truncated. ASCII only (0x20-0x7E).
+std::string truncateLabel(const std::string& text, int maxWidth,
+                          const lgfx::GFXfont* font) {
+    if (text.empty()) {
+        return text;
+    }
+    
+    // Clean non-ASCII bytes (replace with '?')
+    std::string cleaned;
+    for (char c : text) {
+        if (static_cast<unsigned char>(c) >= 0x20 &&
+            static_cast<unsigned char>(c) <= 0x7E) {
+            cleaned += c;
+        } else {
+            cleaned += '?';
+        }
+    }
+    
+    canvas.setFont(font);
+    if (canvas.textWidth(cleaned.c_str()) <= maxWidth) {
+        return cleaned;
+    }
+    
+    // Try cutting at word boundaries
+    size_t lastSpace = 0;
+    for (size_t i = 0; i < cleaned.size(); ++i) {
+        if (cleaned[i] == ' ') {
+            std::string candidate = cleaned.substr(0, i) + ".";
+            if (canvas.textWidth(candidate.c_str()) <= maxWidth) {
+                lastSpace = i;
+            } else {
+                break;
+            }
+        }
+    }
+    
+    if (lastSpace > 0) {
+        return cleaned.substr(0, lastSpace) + ".";
+    }
+    
+    // Hard cut if one word is too long
+    for (size_t i = 1; i < cleaned.size(); ++i) {
+        std::string candidate = cleaned.substr(0, i) + ".";
+        if (canvas.textWidth(candidate.c_str()) > maxWidth) {
+            if (i > 1) {
+                return cleaned.substr(0, i - 1) + ".";
+            }
+            return ".";
+        }
+    }
+    
+    return cleaned + ".";
+}
+
 // A solid triangle of `size` pixels across, centred on the point given. This
 // is what stands in for an arrow glyph, which the DejaVu fonts do not carry.
 void drawArrow(int centerX, int centerY, int size, ButtonArrow arrow) {
@@ -453,11 +514,37 @@ void drawFramedArrivals(const std::string& stopLabel,
         const int y = listY + kListMargin + static_cast<int>(i) * rowHeight;
         const BusServiceRow& row = rows[i];
 
+        canvas.setFont(arrivalsFont());
         canvas.setTextColor(p.ink);
         canvas.setTextDatum(top_left);
         drawBoldString(row.serviceNo.c_str(), arrivalsLayout.serviceColX + 2,
                        y, /*growLeft=*/false);
 
+        // Draw label below service number if present (Win95 theme)
+        if (!row.label.empty()) {
+            const int labelX = arrivalsLayout.serviceColX + 2;
+            const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
+            const int maxLabelWidth = screenWidth() - labelX - 8;
+            
+            canvas.setFont(labelFont());
+            std::string truncated = truncateLabel(row.label, maxLabelWidth, labelFont());
+            canvas.setTextColor(p.ink);
+            canvas.drawString(truncated.c_str(), labelX, labelY);
+            
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+            // Add "2nd" marker for second-visit arrivals if enabled
+            for (size_t col = 0; col < kArrivalsPerService; ++col) {
+                const BusArrival& arrival = row.arrivals[col];
+                if (arrival.visitNumber == "2" && arrival.etaEpoch >= 0) {
+                    int markerX = labelX + canvas.textWidth(truncated.c_str()) + 4;
+                    canvas.drawString("2nd", markerX, labelY);
+                    break;
+                }
+            }
+#endif
+        }
+
+        canvas.setFont(arrivalsFont());
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
             const BusArrival& arrival = row.arrivals[col];
@@ -744,15 +831,50 @@ void displayShowArrivals(const std::string& stopLabel,
 
     drawBattery(power);
 
+    // Check if any row has a label - if so, use label font for all labels
+    bool anyLabels = false;
+    for (const BusServiceRow& row : rows) {
+        if (!row.label.empty()) {
+            anyLabels = true;
+            break;
+        }
+    }
+    
     for (size_t i = 0;
          i < rows.size() && i < arrivalsLayout.servicesPerScreen; ++i) {
         int y = rowHeight + static_cast<int>(i) * rowHeight;
         const BusServiceRow& row = rows[i];
 
+        canvas.setFont(arrivalsFont());
         canvas.setTextColor(TFT_WHITE, TFT_BLACK);
         canvas.setTextDatum(top_left);
         canvas.drawString(row.serviceNo.c_str(), arrivalsLayout.serviceColX, y);
 
+        // Draw label below service number if present
+        if (!row.label.empty()) {
+            const int labelX = arrivalsLayout.serviceColX;
+            const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
+            const int maxLabelWidth = board().screenWidth - labelX - 
+                                      (board().arrivalsFontHeight >= 24 ? 8 : 8);
+            
+            canvas.setFont(labelFont());
+            std::string truncated = truncateLabel(row.label, maxLabelWidth, labelFont());
+            canvas.drawString(truncated.c_str(), labelX, labelY);
+            
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+            // Add "2nd" marker for second-visit arrivals if enabled
+            for (size_t col = 0; col < kArrivalsPerService; ++col) {
+                const BusArrival& arrival = row.arrivals[col];
+                if (arrival.visitNumber == "2" && arrival.etaEpoch >= 0) {
+                    int markerX = labelX + canvas.textWidth(truncated.c_str()) + 4;
+                    canvas.drawString("2nd", markerX, labelY);
+                    break;  // Only show once per row
+                }
+            }
+#endif
+        }
+
+        canvas.setFont(arrivalsFont());
         canvas.setTextDatum(top_right);
         for (size_t col = 0; col < kArrivalsPerService; ++col) {
             const BusArrival& arrival = row.arrivals[col];

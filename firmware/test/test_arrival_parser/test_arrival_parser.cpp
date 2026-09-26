@@ -227,6 +227,174 @@ void test_page_past_the_end_is_empty() {
     TEST_ASSERT_EQUAL_UINT32(0, selectServicePage(services, 6, 2).size());
 }
 
+// V2 API tests
+
+void test_v2_parses_string_bus_stop_code() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "124",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:41:44+08:00", "Load": "SEA", "Type": "SD", "Label": "To St. Michael's Ter", "VisitNumber": "1"}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL_STRING("52109", result.busStopCode.c_str());
+}
+
+void test_v2_parses_label_and_visit_number() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "125",
+          "Loop": {"IsLoop": true, "LoopDesc": "Sims Dr"},
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:47:10+08:00", "Label": "To Sims", "VisitNumber": "1"},
+          "NextBus2": {"EstimatedArrival": "2026-09-26T16:57:09+08:00", "Label": "To St. Michael's Ter", "VisitNumber": "2"}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL_STRING("1", result.services[0].arrivals[0].visitNumber.c_str());
+    TEST_ASSERT_EQUAL_STRING("2", result.services[0].arrivals[1].visitNumber.c_str());
+    TEST_ASSERT_TRUE(result.services[0].isLoop);
+}
+
+void test_v2_empty_label_is_parsed() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "186",
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:56:01+08:00", "Label": ""},
+          "NextBus2": {"EstimatedArrival": "2026-09-26T17:15:59+08:00", "Label": "To Shenton Way Ter"},
+          "NextBus3": {"EstimatedArrival": "", "Label": ""}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL_STRING("", result.services[0].labels[0].c_str());
+    TEST_ASSERT_EQUAL_STRING("To Shenton Way Ter", result.services[0].labels[1].c_str());
+}
+
+void test_strip_to_prefix_removes_to_space() {
+    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", stripToPrefix("To St. Michael's Ter").c_str());
+    TEST_ASSERT_EQUAL_STRING("Sims", stripToPrefix("To Sims").c_str());
+    TEST_ASSERT_EQUAL_STRING("", stripToPrefix("").c_str());
+    TEST_ASSERT_EQUAL_STRING("NoSpace", stripToPrefix("NoSpace").c_str());
+}
+
+void test_flatten_groups_by_service_and_label() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [
+          {
+            "ServiceNo": "124",
+            "NextBus": {"EstimatedArrival": "2026-09-26T16:41:44+08:00", "Label": "To St. Michael's Ter"},
+            "NextBus2": {"EstimatedArrival": "2026-09-26T16:57:11+08:00", "Label": "To St. Michael's Ter"}
+          },
+          {
+            "ServiceNo": "124",
+            "NextBus": {"EstimatedArrival": "2026-09-26T16:46:01+08:00", "Label": "To HarbourFront Int"},
+            "NextBus2": {"EstimatedArrival": "2026-09-26T16:58:01+08:00", "Label": "To HarbourFront Int"}
+          }
+        ]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(2, result.rows.size());
+    TEST_ASSERT_EQUAL_STRING("124", result.rows[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[0].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("124", result.rows[1].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("HarbourFront Int", result.rows[1].label.c_str());
+}
+
+void test_flatten_sorts_arrivals_by_eta() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "139",
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:51:31+08:00", "Label": "To Toa Payoh Int"},
+          "NextBus2": {"EstimatedArrival": "2026-09-26T16:41:27+08:00", "Label": "To Toa Payoh Int"},
+          "NextBus3": {"EstimatedArrival": "2026-09-26T17:06:05+08:00", "Label": "To Toa Payoh Int"}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    // Should be sorted: 16:41, 16:51, 17:06
+    int64_t eta0 = result.rows[0].arrivals[0].etaEpoch;
+    int64_t eta1 = result.rows[0].arrivals[1].etaEpoch;
+    int64_t eta2 = result.rows[0].arrivals[2].etaEpoch;
+    TEST_ASSERT_TRUE(eta0 < eta1);
+    TEST_ASSERT_TRUE(eta1 < eta2);
+}
+
+void test_flatten_skips_empty_slots() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "186",
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:56:01+08:00", "Label": "To Shenton Way Ter"},
+          "NextBus2": {"EstimatedArrival": "2026-09-26T17:15:59+08:00", "Label": "To Shenton Way Ter"},
+          "NextBus3": {"EstimatedArrival": "", "Label": ""}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[0].etaEpoch > 0);
+    TEST_ASSERT_TRUE(result.rows[0].arrivals[1].etaEpoch > 0);
+    TEST_ASSERT_EQUAL_INT64(-1, result.rows[0].arrivals[2].etaEpoch);
+}
+
+void test_flatten_clears_labels_for_single_direction_services() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "186",
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:56:01+08:00", "Label": "To Shenton Way Ter"}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    // Single direction non-loop service should have empty label
+    TEST_ASSERT_EQUAL_STRING("", result.rows[0].label.c_str());
+}
+
+void test_flatten_keeps_labels_for_loops() {
+    const char* json = R"JSON({
+      "busStops": [{
+        "BusStopCode": "52109",
+        "Services": [{
+          "ServiceNo": "125",
+          "Loop": {"IsLoop": true},
+          "NextBus": {"EstimatedArrival": "2026-09-26T16:47:10+08:00", "Label": "To Sims"}
+        }]
+      }]
+    })JSON";
+    ParsedBusStop result = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(result.valid);
+    TEST_ASSERT_EQUAL(1, result.rows.size());
+    // Loop service should keep its label even if only one row
+    TEST_ASSERT_EQUAL_STRING("Sims", result.rows[0].label.c_str());
+    TEST_ASSERT_TRUE(result.rows[0].isLoop);
+}
+
 void setup() {}
 void loop() {}
 
@@ -250,5 +418,15 @@ int main(int argc, char** argv) {
     RUN_TEST(test_page_count_rounds_up);
     RUN_TEST(test_second_page_continues_where_first_ended);
     RUN_TEST(test_page_past_the_end_is_empty);
+    // V2 API tests
+    RUN_TEST(test_v2_parses_string_bus_stop_code);
+    RUN_TEST(test_v2_parses_label_and_visit_number);
+    RUN_TEST(test_v2_empty_label_is_parsed);
+    RUN_TEST(test_strip_to_prefix_removes_to_space);
+    RUN_TEST(test_flatten_groups_by_service_and_label);
+    RUN_TEST(test_flatten_sorts_arrivals_by_eta);
+    RUN_TEST(test_flatten_skips_empty_slots);
+    RUN_TEST(test_flatten_clears_labels_for_single_direction_services);
+    RUN_TEST(test_flatten_keeps_labels_for_loops);
     return UNITY_END();
 }
