@@ -18,8 +18,9 @@ void displaySetTheme(bool win95);
 bool displayThemeIsWin95();
 // How many service rows fit under the header at the arrivals font size.
 // Depends on the panel's height and the font's measured row height, so it is
-// only meaningful after displaySetup().
-size_t servicesPerScreen();
+// only meaningful after displaySetup(). `hasLabels` selects between single-line
+// and two-line row pitch.
+size_t servicesPerScreen(bool hasLabels);
 // Drops the backlight to the dim level, or takes it back to full. Whatever is
 // on screen stays on screen and stays live.
 void displaySetDimmed(bool dimmed);

@@ -15,11 +15,14 @@ struct ArrivalsLayout {
     int etaColRightX[kArrivalsPerService];
     int headerCenterX;  // centred in what the battery icon leaves free
     int pageDotsY;
+    bool hasLabels;  // whether this layout accommodates labels
 };
 
 // `rowHeight` is passed in rather than measured here, because measuring needs
 // a font and a font needs a device. `batteryReservedWidth` is the horizontal
 // space the battery icon occupies at the top right, which the header is
-// centred clear of.
+// centred clear of. `hasLabels` determines row spacing: true uses two-line
+// pitch to accommodate labels, false uses single-line pitch for density.
 ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
-                                     int rowHeight, int batteryReservedWidth);
+                                     int rowHeight, int batteryReservedWidth,
+                                     bool hasLabels);

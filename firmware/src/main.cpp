@@ -158,11 +158,21 @@ void syncTime() {
     timeSynced = now >= 1700000000;
 }
 
+bool cachedRowsHaveLabels() {
+    for (const BusServiceRow& row : cachedRows) {
+        if (!row.label.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void renderCachedPage() {
+    bool hasLabels = cachedRowsHaveLabels();
     size_t totalPages =
-        servicePageCount(cachedRows.size(), servicesPerScreen());
+        servicePageCount(cachedRows.size(), servicesPerScreen(hasLabels));
     std::vector<BusServiceRow> page =
-        selectServicePage(cachedRows, servicesPerScreen(), currentPage);
+        selectServicePage(cachedRows, servicesPerScreen(hasLabels), currentPage);
     
     // Calculate data age for stale indicator
     uint32_t dataAgeMs = 0;
@@ -246,16 +256,18 @@ void pollAndRender() {
     backoffStep = 0;
     lastSuccessfulPollMillis = millis();
     
+    bool hasLabels = cachedRowsHaveLabels();
     if (currentPage >=
-        servicePageCount(cachedRows.size(), servicesPerScreen())) {
+        servicePageCount(cachedRows.size(), servicesPerScreen(hasLabels))) {
         currentPage = 0;
     }
     renderCachedPage();
 }
 
 void stepForward() {
+    bool hasLabels = cachedRowsHaveLabels();
     size_t totalPages =
-        servicePageCount(cachedRows.size(), servicesPerScreen());
+        servicePageCount(cachedRows.size(), servicesPerScreen(hasLabels));
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();

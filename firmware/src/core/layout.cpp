@@ -17,15 +17,25 @@ static_assert(kArrivalsPerService > 1,
 }  // namespace
 
 ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
-                                     int rowHeight, int batteryReservedWidth) {
+                                     int rowHeight, int batteryReservedWidth,
+                                     bool hasLabels) {
     ArrivalsLayout layout{};
-    layout.rowHeight = rowHeight;
+    layout.hasLabels = hasLabels;
     layout.serviceColX = kServiceColX;
+    
+    // Two-line pitch for stops with labels: about 27px on 240x135, 34px on 320x170
+    // Single-line pitch for stops without: 18px on 240x135, 25px on 320x170
+    if (hasLabels) {
+        // Approximate 1.5x spacing for labels
+        layout.rowHeight = rowHeight + rowHeight / 2;
+    } else {
+        layout.rowHeight = rowHeight;
+    }
 
     // The header takes the first row, so one fewer than the rows that fit is
     // available for services. A row taller than the screen leaves none.
-    if (rowHeight > 0) {
-        int rows = screenHeight / rowHeight - 1;
+    if (layout.rowHeight > 0) {
+        int rows = screenHeight / layout.rowHeight - 1;
         layout.servicesPerScreen = rows > 0 ? static_cast<size_t>(rows) : 0;
     }
 
