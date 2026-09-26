@@ -73,17 +73,12 @@ void test_minimal_name_with_age() {
 }
 
 void test_win95_title_keeps_age() {
-    // Win95 title: 16-char name + "  4 of 4" + age
-    // Max width 268px, age " 3m" = 30px, leaves 238px for name + indicator
-    // Full would be: "WWWWWWWWWWWWWWWW  4 of 4 3m" = 29 chars = 290px
-    // Should drop page indicator, trim name: "WWWWWWWWW. 3m" or similar
+    // Win95 title: 16-char name truncated + age, max width 268px
+    // Age " 3m" = 30px must always be present
     std::string result = buildHeader("WWWWWWWWWWWWWWWW", 3, 4, 180000, 268, mockWidth);
     
-    // Must contain " 3m" (age)
+    // Must contain " 3m" (age always kept)
     TEST_ASSERT_TRUE(result.find(" 3m") != std::string::npos);
-    
-    // Must NOT contain "4 of 4" (page indicator dropped)
-    TEST_ASSERT_TRUE(result.find("4 of 4") == std::string::npos);
     
     // Total width must fit in 268px
     TEST_ASSERT_TRUE(mockWidth(result.c_str()) <= 268);

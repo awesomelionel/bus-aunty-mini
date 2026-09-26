@@ -670,6 +670,50 @@ void test_paging_avoids_straddling_multirow_services() {
     TEST_ASSERT_EQUAL_STRING("333", page1[1].serviceNo.c_str());
 }
 
+void test_paging_that_would_split_service() {
+    // Old naive paging WOULD split: service 111(2) + 222(2) with pageSize=3
+    // Old: page0=[111(2) + 222(1st)], page1=[222(2nd)] - splits 222!
+    // New: page0=[111(2)], page1=[222(2)] - keeps 222 together
+    
+    std::vector<BusServiceRow> rows;
+    
+    BusServiceRow row1;
+    row1.serviceNo = "111";
+    row1.label = "North";
+    rows.push_back(row1);
+    
+    BusServiceRow row2;
+    row2.serviceNo = "111";
+    row2.label = "South";
+    rows.push_back(row2);
+    
+    BusServiceRow row3;
+    row3.serviceNo = "222";
+    row3.label = "East";
+    rows.push_back(row3);
+    
+    BusServiceRow row4;
+    row4.serviceNo = "222";
+    row4.label = "West";
+    rows.push_back(row4);
+    
+    // Should get 2 pages
+    size_t pageCount = servicePageCount(rows, 3);
+    TEST_ASSERT_EQUAL(2, pageCount);
+    
+    // Page 0: only 111(2) to avoid splitting 222
+    std::vector<BusServiceRow> page0 = selectServicePage(rows, 3, 0);
+    TEST_ASSERT_EQUAL(2, page0.size());
+    TEST_ASSERT_EQUAL_STRING("111", page0[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("111", page0[1].serviceNo.c_str());
+    
+    // Page 1: all of 222(2)
+    std::vector<BusServiceRow> page1 = selectServicePage(rows, 3, 1);
+    TEST_ASSERT_EQUAL(2, page1.size());
+    TEST_ASSERT_EQUAL_STRING("222", page1[0].serviceNo.c_str());
+    TEST_ASSERT_EQUAL_STRING("222", page1[1].serviceNo.c_str());
+}
+
 void setup() {}
 void loop() {}
 
@@ -713,5 +757,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_service_with_no_arrivals_kept_as_row);
     RUN_TEST(test_service_with_no_arrivals_across_multiple_entries);
     RUN_TEST(test_paging_avoids_straddling_multirow_services);
+    RUN_TEST(test_paging_that_would_split_service);
     return UNITY_END();
 }
