@@ -1,11 +1,13 @@
 # Bus Aunty Display Firmware
 
 ESP32-S3 firmware that polls
-`GET https://api.busaunty.com/api/v1/BusArrival?BusStopCode=<code>` every 30
-seconds and shows up to 6 bus services — 5 on the T-Display-S3, which spends a
-row on larger text, or 4 with its optional Windows 95 screen — with all 3
-arrival times each, for up to 4 configured bus stops. Bus stops and WiFi credentials are both set on a
-page the device serves at `http://busaunty.local` — nothing is compiled in.
+`GET https://api.busaunty.com/api/v2/BusArrival?BusStopCode=<code>` every 60
+seconds (120s, then 240s, then 300s after consecutive failures) and shows up to
+6 bus services — 5 on the T-Display-S3, which spends a row on larger text, or 4
+with its optional Windows 95 screen. A destination label under the service
+number costs two of those rows (4, 4, and 3). Each row shows up to 3 arrival
+times, for up to 4 configured bus stops. Bus stops and WiFi credentials are both
+set on a page the device serves at `http://busaunty.local` — nothing is compiled in.
 
 ## Supported boards
 
@@ -24,7 +26,9 @@ One source tree builds for all three boards below; pick one with `-e <env>`.
 The StickS3 and the Feather are both driven in 240x135 landscape and show
 exactly the same screens. The T-Display-S3's panel is 320x170, and it spends
 that extra room on larger text rather than on more services: 5 rows of DejaVu24
-against the other two boards' 6 of DejaVu18. Every position on the arrivals
+against the other two boards' 6 of DejaVu18, before destination labels. With a
+label under the service number those become 4, 4, and 3 (Windows 95 on the
+T-Display drops one more). Every position on the arrivals
 screen is derived from the panel's geometry and the measured row height, so no
 screen is hand-placed per board.
 
@@ -121,6 +125,20 @@ selects `tinyuf2-partitions-4MB-noota.csv`, giving the app 2816K and keeping
 the `uf2` partition so double-tap flashing still works. The other two boards
 use their manifest's default table and have room to spare — the T-Display-S3's
 16MB leaves the app 6.5MB, of which this firmware uses about a fifth.
+
+Host PNGs of the arrivals screen, without a device, link the real
+`src/ui/display.cpp` against a software canvas and the DejaVu GFXfont bitmaps
+vendored under `src/host/fonts`:
+
+```bash
+cd firmware
+pio run -e host_render
+.pio/build/host_render/program /tmp/bus-aunty-renders test/data
+```
+
+The first argument is the output directory (default `/opt/cursor/artifacts`) and
+the second is the fixture directory (default `test/data`). `host_render` is not
+in `default_envs`, so `pio run` and CI do not build it.
 
 ## Run the unit tests
 

@@ -1,7 +1,7 @@
 name: firmware
 
-# The point of supporting two boards from one tree is that neither can rot
-# unnoticed, which only holds if both are built on every change.
+# The point of supporting three boards from one tree is that none can rot
+# unnoticed, which only holds if all three are built on every change.
 on:
   push:
     branches: [main]
@@ -41,7 +41,8 @@ jobs:
         working-directory: firmware
         run: pio test -e native
 
-      # No -e: this builds every env in default_envs, i.e. both boards.
+      # No -e: this builds every env in default_envs, i.e. the three boards.
+      # host_render is omitted on purpose; it is a native PNG tool, not firmware.
       - name: Build all boards
         working-directory: firmware
         run: pio run
