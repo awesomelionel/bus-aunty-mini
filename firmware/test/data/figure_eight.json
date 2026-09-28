@@ -1,0 +1,62 @@
+{
+  "busStops": [
+    {
+      "BusStopCode": "54009",
+      "UpdatedAt": "2026-09-28T16:40:00.000000+08:00",
+      "Services": [
+        {
+          "ServiceNo": "291",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:42:00+08:00", "Load": "SEA", "Type": "SD", "Label": "To Tampines Int", "VisitNumber": "1", "Terminating": false},
+          "NextBus2": {"EstimatedArrival": "2026-09-28T16:52:00+08:00", "Load": "SDA", "Type": "DD", "Label": "To Tampines Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "291",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:44:00+08:00", "Load": "SEA", "Type": "SD", "Label": "To Toa Payoh Int", "VisitNumber": "1", "Terminating": false},
+          "NextBus2": {"EstimatedArrival": "2026-09-28T16:55:00+08:00", "Load": "LSD", "Type": "SD", "Label": "To Toa Payoh Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "293",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:43:00+08:00", "Load": "SEA", "Type": "SD", "Label": "To Tampines Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "293",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:47:00+08:00", "Load": "SDA", "Type": "DD", "Label": "To Toa Payoh Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "358",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:46:00+08:00", "Load": "SEA", "Type": "SD", "Label": "To Pasir Ris Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "358",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:49:00+08:00", "Load": "SEA", "Type": "SD", "Label": "To Jurong East Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "359",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:48:00+08:00", "Load": "SDA", "Type": "SD", "Label": "To Clementi Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "359",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:51:00+08:00", "Load": "SEA", "Type": "DD", "Label": "To Pasir Ris Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "812",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:45:00+08:00", "Load": "SEA", "Type": "SD", "Label": "To Yishun Int", "VisitNumber": "1", "Terminating": false}
+        },
+        {
+          "ServiceNo": "812",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {"EstimatedArrival": "2026-09-28T16:53:00+08:00", "Load": "LSD", "Type": "SD", "Label": "To Tampines Int", "VisitNumber": "2", "Terminating": false}
+        }
+      ]
+    }
+  ]
+}

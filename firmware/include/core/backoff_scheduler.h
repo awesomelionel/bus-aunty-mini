@@ -2,11 +2,13 @@
 #include <cstdint>
 #include <cstddef>
 
-// Backoff intervals in milliseconds
-// [0]=60s normal poll, [1]=60s first retry, [2]=120s, [3]=240s, [4]=300s cap
-constexpr uint32_t kBackoffIntervalsMs[] = {60000, 60000, 120000, 240000, 300000};
+// Backoff intervals in milliseconds, measured from the start of the attempt.
+// [0]=60s healthy poll. After a failure the step advances, so the first retry
+// is 120s, then 240s, then 300s (the cap).
+constexpr uint32_t kBackoffIntervalsMs[] = {60000, 120000, 240000, 300000};
 constexpr size_t kMaxBackoffStep = sizeof(kBackoffIntervalsMs) / sizeof(kBackoffIntervalsMs[0]);
-constexpr uint32_t kStaleDataThresholdMs = 600000;  // 10 minutes
+constexpr uint32_t kStaleDataThresholdMs = 600000;  // 10 minutes: replace the rows
+constexpr uint32_t kHeaderStaleNoteMs = 150000;     // "as of HH:MM" in the header
 constexpr uint32_t kDisplayRefreshIntervalMs = 15000;  // 15 seconds
 
 struct BackoffState {

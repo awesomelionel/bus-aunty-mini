@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/arrival_parser.h"
+#include "core/arrival_screen.h"
 #include "core/backoff_scheduler.h"
 #include "core/bus_stop_config.h"
 #include "core/night_window.h"
@@ -69,6 +70,9 @@ struct StopCache {
     std::vector<BusServiceRow> rows;
     std::string label;
     uint32_t fetchedAtMillis = 0;
+    int64_t updatedAtEpoch = -1;
+    bool hadArrivals = false;
+    bool notFound = false;
     bool valid = false;
 };
 std::array<StopCache, kMaxBusStops> stopCaches;
@@ -106,6 +110,8 @@ void logWifiDiagnostics() {
 }
 
 void persistDirtySettings() {
+    const bool saved = stopsDirty || alwaysOnDirty || win95ThemeDirty ||
+                       networksDirty;
     if (stopsDirty) {
         saveBusStops(busStops);
         stopsDirty = false;
@@ -114,6 +120,8 @@ void persistDirtySettings() {
             cache.valid = false;
             cache.rows.clear();
             cache.stopCode.clear();
+            cache.notFound = false;
+            cache.hadArrivals = false;
         }
         currentPage = 0;
         needsImmediateFetch = wifiLinkConnected();
@@ -135,12 +143,18 @@ void persistDirtySettings() {
         for (StopCache& cache : stopCaches) {
             cache.valid = false;
             cache.rows.clear();
+            cache.notFound = false;
+            cache.hadArrivals = false;
         }
         needsImmediateFetch = wifiLinkConnected();
     }
     if (networksDirty) {
         saveWifiNetworks(wifiNetworks);
         networksDirty = false;
+    }
+    // A config save starts the retry schedule over, the same as a good fetch.
+    if (saved) {
+        resetBackoff(backoffState);
     }
 }
 
@@ -177,11 +191,34 @@ void syncTime() {
 
 bool cachedRowsHaveLabels(const std::vector<BusServiceRow>& rows) {
     for (const BusServiceRow& row : rows) {
-        if (!row.label.empty()) {
+        if (rowShowsLabel(row)) {
             return true;
         }
     }
     return false;
+}
+
+void showArrivalScreen(ArrivalScreen screen, const StopCache& cache) {
+    const std::string hm = formatLocalHm(cache.updatedAtEpoch);
+    switch (screen) {
+        case ArrivalScreen::Loading:
+            displayShowStatus("Loading...");
+            break;
+        case ArrivalScreen::NotFound:
+            displayShowStatus("No data\nCheck stop code");
+            break;
+        case ArrivalScreen::NoRecentData:
+            displayShowStatus("No data\nLast: " + hm);
+            break;
+        case ArrivalScreen::NoServices:
+            displayShowStatus(cache.label + ": no services");
+            break;
+        case ArrivalScreen::NoMoreBuses:
+            displayShowStatus("No More Buses\nUpdated " + hm);
+            break;
+        case ArrivalScreen::Arrivals:
+            break;
+    }
 }
 
 void renderCachedPage() {
@@ -200,30 +237,33 @@ void renderCachedPage() {
         return;
     }
     
-    // If cache has no rows, show "no services"
-    if (cache.rows.empty()) {
-        displayShowStatus(cache.label + ": no services");
+    const int64_t nowEpoch = time(nullptr);
+    const bool clockSet = nowEpoch >= kClockSetEpoch;
+    std::vector<BusServiceRow> live = cache.rows;
+    if (clockSet) {
+        pruneExpiredArrivals(live, nowEpoch);
+    }
+    const uint32_t ageMs = dataAgeMs(cache.fetchedAtMillis, millis());
+    const ArrivalScreen screen = selectArrivalScreen(
+        clockSet, cache.notFound, cache.hadArrivals, !live.empty(), ageMs);
+    if (screen != ArrivalScreen::Arrivals) {
+        showArrivalScreen(screen, cache);
         return;
     }
-    
-    // If data is past 10-minute threshold, show error instead of stale rows
-    if (isDataStale(cache.fetchedAtMillis, millis())) {
-        displayShowStatus("No recent data");
-        return;
-    }
-    
-    bool hasLabels = cachedRowsHaveLabels(cache.rows);
+
+    bool hasLabels = cachedRowsHaveLabels(live);
     size_t totalPages =
-        servicePageCount(cache.rows, servicesPerScreen(hasLabels));
+        servicePageCount(live, servicesPerScreen(hasLabels));
+    if (currentPage >= totalPages) {
+        currentPage = 0;
+    }
     std::vector<BusServiceRow> page =
-        selectServicePage(cache.rows, servicesPerScreen(hasLabels), currentPage);
-    
-    // Calculate data age (wrap-safe: unsigned subtraction wraps correctly)
-    uint32_t ageMs = dataAgeMs(cache.fetchedAtMillis, millis());
-    
-    displayShowArrivals(cache.label, page, time(nullptr), currentStopIndex,
+        selectServicePage(live, servicesPerScreen(hasLabels), currentPage);
+
+    displayShowArrivals(cache.label, page, nowEpoch, currentStopIndex,
                          busStops.size(), currentPage, totalPages,
-                         hal::powerStatus(), ageMs);
+                         hal::powerStatus(), ageMs, cache.updatedAtEpoch,
+                         !wifiLinkConnected());
 }
 
 void pollAndRender() {
@@ -235,47 +275,34 @@ void pollAndRender() {
     const std::string& label = busStopLabel(stop);
     StopCache& cache = stopCaches[currentStopIndex];
     
-    // Check if we have valid cache data < 10 minutes old
-    bool haveFreshCache = cache.valid && 
-                          !isDataStale(cache.fetchedAtMillis, millis());
+    // Errors keep the last good payload. The 10-minute screen is applied
+    // when that payload is drawn, not by discarding it here.
+    bool haveCache = cache.valid;
     
     // Only show "Loading..." on first fetch or stop change
     if (!cache.valid) {
         displayShowStatus("Loading " + label + "...");
     }
 
+    // The retry interval is measured from the start of this attempt.
     backoffState.lastAttemptMs = millis();
     
     wifiLinkSetBusy(true);
     FetchResult fetch = fetchBusArrival(stop.code);
     wifiLinkSetBusy(false);
-    
-    // Handle errors with backoff
-    if (!fetch.ok) {
-        if (fetch.parseError) {
-            // JSON parse error - increment backoff, show "Bad data"
-            incrementBackoff(backoffState);
-            if (haveFreshCache) {
-                renderCachedPage();
-            } else {
-                displayShowStatus("Bad data");
-            }
-            return;
-        }
-        
-        if (fetch.httpStatus == 404) {
-            // 404 is not a backend error - clear cache, show "No data"
-            cache.valid = false;
-            cache.rows.clear();
-            displayShowStatus("No data for " + label);
-            resetBackoff(backoffState);
-            return;
-        }
-        
-        // Network error, timeout, or 5xx - increment backoff, keep cached data
+
+    // Status first. Error bodies are plain text, so they are not parsed.
+    if (classifyFetch(fetch.httpStatus, false) == FetchClass::NotFound) {
+        cache.stopCode = stop.code;
+        cache.label = label;
+        cache.notFound = true;
+        cache.valid = true;
+        renderCachedPage();
+        return;
+    }
+    if (fetch.httpStatus != 200) {
         incrementBackoff(backoffState);
-        // Fall back to stale cache if < 10 minutes old
-        if (haveFreshCache) {
+        if (haveCache) {
             renderCachedPage();
         } else {
             displayShowStatus(std::string("Fetch failed (") +
@@ -285,36 +312,37 @@ void pollAndRender() {
     }
 
     ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
-    if (!parsed.valid) {
-        // Parse error in arrival_parser - increment backoff, fall back to cache
+    if (classifyFetch(fetch.httpStatus, parsed.valid) != FetchClass::Ok) {
+        // Parse error, or a 200 whose busStops list does not contain this stop.
         incrementBackoff(backoffState);
-        if (haveFreshCache) {
+        if (haveCache) {
             renderCachedPage();
+        } else if (fetch.parseError) {
+            displayShowStatus("Bad data");
         } else {
             displayShowStatus("Bad response for " + label);
         }
         return;
     }
-    
-    if (parsed.rows.empty()) {
-        // Empty services is not an error state
-        cache.stopCode = stop.code;
-        cache.rows.clear();
-        cache.label = label;
-        cache.fetchedAtMillis = millis();
-        cache.valid = true;
-        displayShowStatus(label + ": no services");
-        resetBackoff(backoffState);
-        return;
-    }
 
-    // Success - update cache, reset backoff
+    const int64_t nowEpoch = time(nullptr);
+    cache.hadArrivals = rowsHaveArrivals(parsed.rows);
+    if (nowEpoch >= kClockSetEpoch) {
+        pruneExpiredArrivals(parsed.rows, nowEpoch);
+    }
     cache.stopCode = stop.code;
     cache.rows = parsed.rows;
     cache.label = label;
+    cache.updatedAtEpoch = parsed.updatedAtEpoch;
     cache.fetchedAtMillis = millis();
+    cache.notFound = false;
     cache.valid = true;
     resetBackoff(backoffState);
+
+    if (!cache.hadArrivals) {
+        renderCachedPage();
+        return;
+    }
     
     bool hasLabels = cachedRowsHaveLabels(cache.rows);
     if (currentPage >=
@@ -338,9 +366,13 @@ void stepForward() {
         return;
     }
     
-    bool hasLabels = cachedRowsHaveLabels(cache.rows);
+    std::vector<BusServiceRow> live = cache.rows;
+    if (time(nullptr) >= kClockSetEpoch) {
+        pruneExpiredArrivals(live, time(nullptr));
+    }
+    bool hasLabels = cachedRowsHaveLabels(live);
     size_t totalPages =
-        servicePageCount(cache.rows, servicesPerScreen(hasLabels));
+        servicePageCount(live, servicesPerScreen(hasLabels));
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();
@@ -384,6 +416,8 @@ void enterSleep() {
     for (StopCache& cache : stopCaches) {
         cache.valid = false;
         cache.rows.clear();
+        cache.notFound = false;
+        cache.hadArrivals = false;
     }
     currentPage = 0;
     noStopsRendered = false;
@@ -592,8 +626,17 @@ void loop() {
         return;
     }
 
+    const bool cachedStop =
+        !busStops.empty() && currentStopIndex < busStops.size() &&
+        currentStopIndex < kMaxBusStops &&
+        stopCaches[currentStopIndex].valid;
+
     if (wifiLinkConnecting()) {
-        if (!connectingRendered) {
+        if (cachedStop && keepArrivalsOnWifiLoss(true)) {
+            renderCachedPage();
+            connectingRendered = false;
+            offlineRendered = false;
+        } else if (!connectingRendered) {
             displayShowStatus("Connecting WiFi...");
             connectingRendered = true;
             offlineRendered = false;
@@ -603,7 +646,12 @@ void loop() {
     }
 
     if (!wifiLinkConnected()) {
-        if (!offlineRendered && !inConfigScreen) {
+        if (cachedStop &&
+            keepArrivalsOnWifiLoss(stopCaches[currentStopIndex].valid)) {
+            renderCachedPage();
+            offlineRendered = false;
+            connectingRendered = false;
+        } else if (!offlineRendered && !inConfigScreen) {
             displayShowWifiOffline();
             offlineRendered = true;
             connectingRendered = false;

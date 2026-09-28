@@ -39,6 +39,14 @@ int64_t parseIso8601ToEpoch(const std::string& iso8601) {
     int64_t epoch = days * 86400 + hour * 3600 + minute * 60 + second;
 
     const char* tail = iso8601.c_str() + consumed;
+    // UpdatedAt carries fractional seconds ("...03.630381+08:00"). The epoch
+    // is whole seconds, so the fraction is skipped rather than rounded.
+    if (tail[0] == '.') {
+        ++tail;
+        while (tail[0] >= '0' && tail[0] <= '9') {
+            ++tail;
+        }
+    }
     if (tail[0] == '\0' || (tail[0] == 'Z' && tail[1] == '\0')) {
         return epoch;
     }

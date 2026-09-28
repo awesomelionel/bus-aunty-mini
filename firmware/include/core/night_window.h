@@ -1,6 +1,7 @@
 // firmware/include/core/night_window.h
 #pragma once
 #include <cstdint>
+#include <string>
 
 // When the framed arrivals screen should wear its dark palette.
 //
@@ -24,6 +25,9 @@ constexpr int64_t kClockSetEpoch = 1700000000;
 
 // Local hour 0-23, or -1 when the clock has not been set.
 int localHourFor(int64_t epochSeconds, int32_t utcOffsetSeconds);
+
+// "HH:MM" in the Singapore offset. Empty when epochSeconds is negative.
+std::string formatLocalHm(int64_t epochSeconds);
 
 // True inside the night window. An unset clock reads as day: a device still
 // waiting on NTP should not sit in a dark palette for no reason, and it will

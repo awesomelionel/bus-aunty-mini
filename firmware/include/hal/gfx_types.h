@@ -24,6 +24,8 @@ namespace hal {
 using Gfx = LGFX_Device;
 using Canvas = LGFX_Sprite;
 }  // namespace hal
+#elif defined(BOARD_HOST)
+#include "host/host_gfx.h"
 #else
 #error "No BOARD_* define; see platformio.ini"
 #endif

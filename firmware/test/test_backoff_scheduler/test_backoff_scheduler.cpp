@@ -8,12 +8,11 @@ void test_first_attempt_returns_true() {
 }
 
 void test_backoff_intervals() {
-    TEST_ASSERT_EQUAL_UINT32(60000, backoffIntervalMs(0));  // Normal poll
-    TEST_ASSERT_EQUAL_UINT32(60000, backoffIntervalMs(1));  // First retry
-    TEST_ASSERT_EQUAL_UINT32(120000, backoffIntervalMs(2));  // Second retry
-    TEST_ASSERT_EQUAL_UINT32(240000, backoffIntervalMs(3));  // Third retry
-    TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(4));  // Fourth+ retry (cap)
-    TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(5));  // Caps at last
+    TEST_ASSERT_EQUAL_UINT32(60000, backoffIntervalMs(0));   // Healthy poll
+    TEST_ASSERT_EQUAL_UINT32(120000, backoffIntervalMs(1));  // First retry
+    TEST_ASSERT_EQUAL_UINT32(240000, backoffIntervalMs(2));  // Second retry
+    TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(3));  // Third retry, cap
+    TEST_ASSERT_EQUAL_UINT32(300000, backoffIntervalMs(4));  // Caps at last
 }
 
 void test_backoff_increments_and_caps() {
@@ -30,10 +29,7 @@ void test_backoff_increments_and_caps() {
     TEST_ASSERT_EQUAL_UINT32(3, state.step);
     
     incrementBackoff(state);
-    TEST_ASSERT_EQUAL_UINT32(4, state.step);
-    
-    incrementBackoff(state);
-    TEST_ASSERT_EQUAL_UINT32(4, state.step);  // Capped at 4
+    TEST_ASSERT_EQUAL_UINT32(3, state.step);  // Capped at 3
 }
 
 void test_backoff_resets() {

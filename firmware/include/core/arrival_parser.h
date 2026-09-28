@@ -24,38 +24,49 @@ enum class BusType {
     Bendy,       // "BD"
 };
 
-// The feed carries at most three upcoming buses per service.
+// The feed carries at most three upcoming buses per service. A row keeps that
+// same cap after arrivals from several slots are merged.
 constexpr size_t kArrivalsPerService = 3;
+
+// Drop an arrival once it is more than this far past its ETA. Exactly this
+// many seconds past is still shown (as "Arr").
+constexpr int64_t kEtaDropPastSeconds = 120;
 
 struct BusArrival {
     int64_t etaEpoch = -1;
     BusLoad load = BusLoad::Unknown;
     BusType type = BusType::Unknown;
     std::string visitNumber;  // "1", "2", or empty
+    // The bus ends its trip at this stop. Marked on screen, never hidden.
+    bool terminating = false;
 };
 
-// A row groups arrivals with the same (serviceNo, label) pair.
-// The label is the destination stripped of "To " prefix.
+// A row is one (service, destination label, visit) on screen.
+// `label` is the destination with a leading "To " removed. Empty when the
+// feed had no label and the loop description did not fill in.
 struct BusServiceRow {
     std::string serviceNo;
-    std::string label;  // Empty for services with only one direction at this stop
+    std::string label;
+    std::string visitNumber;
     bool isLoop = false;
-    std::array<BusArrival, kArrivalsPerService> arrivals;
+    std::array<BusArrival, kArrivalsPerService> arrivals{};
 };
 
-// Legacy structure for parsing from v2 API, before flattening.
+// One Services[] entry, before rows are grouped.
 struct BusService {
     std::string serviceNo;
     bool isLoop = false;
-    std::array<BusArrival, kArrivalsPerService> arrivals;
-    std::array<std::string, kArrivalsPerService> labels;
+    std::string loopDesc;
+    std::array<BusArrival, kArrivalsPerService> arrivals{};
+    std::array<std::string, kArrivalsPerService> labels{};
 };
 
 struct ParsedBusStop {
     bool valid = false;
     std::string busStopCode;
+    int64_t updatedAtEpoch = -1;
     std::vector<BusService> services;
-    std::vector<BusServiceRow> rows;  // Flattened view grouped by (serviceNo, label)
+    std::vector<BusServiceRow> rows;
 };
 
 ParsedBusStop parseBusArrivalResponse(const std::string& json,
@@ -64,24 +75,39 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
 BusLoad parseBusLoad(const std::string& raw);
 BusType parseBusType(const std::string& raw);
 
-// Strip "To " prefix from a label. Returns empty string if input is empty.
+// Strip a leading "To ". Labels without that prefix are returned unchanged.
 std::string stripToPrefix(const std::string& label);
 
-// Flatten Services entries into rows keyed by (serviceNo, label).
-// Arrivals are sorted by ETA within each row, empty slots skipped.
-// For loops, VisitNumber "1" rows come before "2" rows.
+// Group Services entries into rows keyed by (ServiceNo, Label, VisitNumber),
+// in API order. A service's rows stay together, and visit "1" comes before
+// visit "2". See arrival_parser.cpp for the borrow and loop-description rules.
 std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services);
 
-// A stop can list more rows than fit on screen, so they are shown a page
-// at a time. Returns 0 pages when there is nothing to show.
+// Remove arrivals more than kEtaDropPastSeconds in the past. A row that has
+// nothing left is dropped. An unset clock (nowEpoch < kClockSetEpoch) is a
+// no-op so the device stays on "Loading..." rather than deleting buses.
+void pruneExpiredArrivals(std::vector<BusServiceRow>& rows, int64_t nowEpoch);
+
+bool rowsHaveArrivals(const std::vector<BusServiceRow>& rows);
+
+// Every timed arrival on the row is terminating. Empty slots do not count.
+// An empty row is not "all terminating".
+bool rowAllTerminating(const BusServiceRow& row);
+
 size_t servicePageCount(size_t serviceCount, size_t pageSize);
 size_t servicePageCount(const std::vector<BusServiceRow>& rows, size_t pageSize);
 std::vector<BusServiceRow> selectServicePage(
     const std::vector<BusServiceRow>& rows, size_t pageSize, size_t page);
-// Legacy overload for old tests
 std::vector<BusService> selectServicePage(
     const std::vector<BusService>& services, size_t pageSize, size_t page);
 
-// Returns true if row should show "2nd" marker
-// (all non-empty arrivals are visit "2")
+// "2nd" sits on the label line only when the row has a destination (or a loop
+// description standing in for one), every timed arrival is visit "2", and the
+// row is not the all-terminating "Ends here" case.
 bool shouldShowVisit2Marker(const BusServiceRow& row);
+
+// True when the row draws a second line: a destination, a loop description,
+// or "Ends here" for an all-terminating row.
+inline bool rowShowsLabel(const BusServiceRow& row) {
+    return !row.label.empty() || rowAllTerminating(row);
+}

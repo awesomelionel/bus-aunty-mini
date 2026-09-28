@@ -2,12 +2,24 @@
 
 #include <ArduinoJson.h>
 
-#include <algorithm>
 #include <string>
 
 #include "core/iso8601.h"
+#include "core/night_window.h"
 
 namespace {
+
+void sortArrivalsByEta(std::vector<BusArrival>& items) {
+    for (size_t i = 1; i < items.size(); ++i) {
+        BusArrival key = items[i];
+        size_t j = i;
+        while (j > 0 && items[j - 1].etaEpoch > key.etaEpoch) {
+            items[j] = items[j - 1];
+            --j;
+        }
+        items[j] = key;
+    }
+}
 
 BusArrival readArrival(JsonVariantConst nextBus) {
     BusArrival arrival;
@@ -22,16 +34,58 @@ BusArrival readArrival(JsonVariantConst nextBus) {
     arrival.load = parseBusLoad(nextBus["Load"] | "");
     arrival.type = parseBusType(nextBus["Type"] | "");
     arrival.visitNumber = nextBus["VisitNumber"] | "";
+    arrival.terminating = nextBus["Terminating"] | false;
     return arrival;
+}
+
+std::string readLabel(JsonVariantConst nextBus) {
+    if (nextBus.isNull()) {
+        return "";
+    }
+    return nextBus["Label"] | "";
 }
 
 std::string stripLeadingZeros(const std::string& s) {
     size_t firstNonZero = s.find_first_not_of('0');
     if (firstNonZero == std::string::npos) {
-        return "0";  // all zeros (or empty) -> canonical "0"
+        return "0";
     }
     return s.substr(firstNonZero);
 }
+
+// Keeps the fields the row model reads and drops the rest of a v2 payload
+// before it is stored. Terminating stays in the filter so a terminating bus
+// is marked rather than discarded with the unused keys.
+void buildArrivalFilter(JsonDocument& filter) {
+    filter["busStops"][0]["BusStopCode"] = true;
+    filter["busStops"][0]["UpdatedAt"] = true;
+    filter["busStops"][0]["Services"][0]["ServiceNo"] = true;
+    filter["busStops"][0]["Services"][0]["Loop"]["IsLoop"] = true;
+    filter["busStops"][0]["Services"][0]["Loop"]["LoopDesc"] = true;
+    const char* slots[] = {"NextBus", "NextBus2", "NextBus3"};
+    for (const char* slot : slots) {
+        filter["busStops"][0]["Services"][0][slot]["EstimatedArrival"] = true;
+        filter["busStops"][0]["Services"][0][slot]["Load"] = true;
+        filter["busStops"][0]["Services"][0][slot]["Type"] = true;
+        filter["busStops"][0]["Services"][0][slot]["VisitNumber"] = true;
+        filter["busStops"][0]["Services"][0][slot]["Label"] = true;
+        filter["busStops"][0]["Services"][0][slot]["Terminating"] = true;
+    }
+}
+
+struct RowAcc {
+    std::string serviceNo;
+    std::string label;
+    std::string visit;
+    bool isLoop = false;
+    // Empty-label rows from different Services[] entries must not merge.
+    // A labelled row uses this sentinel so matching labels do merge.
+    size_t entryKey = 0;
+    size_t firstIndex = 0;
+    std::vector<BusArrival> arrivals;
+};
+
+constexpr size_t kMergeEntries = static_cast<size_t>(-1);
 
 }  // namespace
 
@@ -39,8 +93,12 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
                                        const std::string& expectedStopCode) {
     ParsedBusStop result;
 
+    JsonDocument filter;
+    buildArrivalFilter(filter);
+
     JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, json);
+    DeserializationError err =
+        deserializeJson(doc, json, DeserializationOption::Filter(filter));
     if (err) {
         return result;
     }
@@ -59,33 +117,28 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
         }
 
         result.busStopCode = expectedStopCode;
+        const char* updated = stop["UpdatedAt"] | "";
+        if (updated[0] != '\0') {
+            result.updatedAtEpoch = parseIso8601ToEpoch(updated);
+        }
         for (JsonObjectConst service : stop["Services"].as<JsonArrayConst>()) {
             BusService svc;
             svc.serviceNo = service["ServiceNo"] | "";
-            
+
             JsonVariantConst loop = service["Loop"];
             if (!loop.isNull()) {
                 svc.isLoop = loop["IsLoop"] | false;
+                if (!loop["LoopDesc"].isNull()) {
+                    svc.loopDesc = loop["LoopDesc"] | "";
+                }
             }
-            
+
             svc.arrivals[0] = readArrival(service["NextBus"]);
             svc.arrivals[1] = readArrival(service["NextBus2"]);
             svc.arrivals[2] = readArrival(service["NextBus3"]);
-            
-            // Extract labels from arrivals (v2 API)
-            JsonVariantConst nb = service["NextBus"];
-            if (!nb.isNull()) {
-                svc.labels[0] = nb["Label"] | "";
-            }
-            nb = service["NextBus2"];
-            if (!nb.isNull()) {
-                svc.labels[1] = nb["Label"] | "";
-            }
-            nb = service["NextBus3"];
-            if (!nb.isNull()) {
-                svc.labels[2] = nb["Label"] | "";
-            }
-            
+            svc.labels[0] = readLabel(service["NextBus"]);
+            svc.labels[1] = readLabel(service["NextBus2"]);
+            svc.labels[2] = readLabel(service["NextBus3"]);
             result.services.push_back(svc);
         }
         result.rows = flattenToRows(result.services);
@@ -123,350 +176,220 @@ BusType parseBusType(const std::string& raw) {
 }
 
 std::string stripToPrefix(const std::string& label) {
-    if (label.empty()) {
-        return "";
-    }
-    if (label.size() >= 3 && label[0] == 'T' && label[1] == 'o' && label[2] == ' ') {
+    if (label.size() >= 3 && label[0] == 'T' && label[1] == 'o' &&
+        label[2] == ' ') {
         return label.substr(3);
     }
     return label;
 }
 
 std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services) {
-    struct RowData {
-        std::string serviceNo;
-        std::string label;
-        bool isLoop = false;
-        std::vector<BusArrival> arrivals;
-        int firstSeenVisit = 0;
-        size_t firstSeenIndex = 0;
-    };
-    
-    std::vector<RowData> rowData;
+    std::vector<RowAcc> acc;
     std::vector<std::string> serviceOrder;
-    std::vector<std::string> servicesWithArrivals;
-    
-    for (const BusService& svc : services) {
-        // Track first-seen service order
-        bool foundService = false;
-        for (const std::string& s : serviceOrder) {
-            if (s == svc.serviceNo) {
-                foundService = true;
+    size_t nextIndex = 0;
+
+    for (size_t entry = 0; entry < services.size(); ++entry) {
+        const BusService& svc = services[entry];
+        bool seenService = false;
+        for (const std::string& name : serviceOrder) {
+            if (name == svc.serviceNo) {
+                seenService = true;
                 break;
             }
         }
-        if (!foundService) {
+        if (!seenService) {
             serviceOrder.push_back(svc.serviceNo);
         }
-        
+
+        std::string slotLabel[kArrivalsPerService];
+        std::string slotVisit[kArrivalsPerService];
         for (size_t i = 0; i < kArrivalsPerService; ++i) {
-            const BusArrival& arr = svc.arrivals[i];
-            if (arr.etaEpoch < 0) {
+            slotLabel[i] = stripToPrefix(svc.labels[i]);
+            slotVisit[i] = svc.arrivals[i].visitNumber;
+        }
+        // An empty label borrows the first non-empty label in this same
+        // entry that shares its VisitNumber. It does not borrow from a
+        // different Services[] entry.
+        for (size_t i = 0; i < kArrivalsPerService; ++i) {
+            if (svc.arrivals[i].etaEpoch < 0 || !slotLabel[i].empty()) {
                 continue;
             }
-            
-            // Track services with arrivals
-            bool foundWithArrivals = false;
-            for (const std::string& s : servicesWithArrivals) {
-                if (s == svc.serviceNo) {
-                    foundWithArrivals = true;
+            for (size_t j = 0; j < kArrivalsPerService; ++j) {
+                if (!slotLabel[j].empty() && slotVisit[j] == slotVisit[i]) {
+                    slotLabel[i] = slotLabel[j];
                     break;
                 }
             }
-            if (!foundWithArrivals) {
-                servicesWithArrivals.push_back(svc.serviceNo);
-            }
-            
-            std::string label = stripToPrefix(svc.labels[i]);
-            
-            // Find or create row
-            RowData* found = nullptr;
-            for (RowData& rd : rowData) {
-                if (rd.serviceNo == svc.serviceNo && rd.label == label) {
-                    found = &rd;
-                    break;
-                }
-            }
-            
-            if (!found) {
-                RowData newRow;
-                newRow.serviceNo = svc.serviceNo;
-                newRow.label = label;
-                newRow.isLoop = svc.isLoop;
-                newRow.firstSeenVisit = (arr.visitNumber == "2") ? 2 : 1;
-                // Count existing rows for this service
-                size_t idx = 0;
-                for (const RowData& rd : rowData) {
-                    if (rd.serviceNo == svc.serviceNo) ++idx;
-                }
-                newRow.firstSeenIndex = idx;
-                rowData.push_back(newRow);
-                found = &rowData.back();
-            }
-            found->arrivals.push_back(arr);
         }
-    }
-    
-    // Create empty rows for services with no arrivals
-    for (const std::string& serviceNo : serviceOrder) {
-        bool hasArrivals = false;
-        for (const std::string& s : servicesWithArrivals) {
-            if (s == serviceNo) {
-                hasArrivals = true;
-                break;
-            }
-        }
-        if (!hasArrivals) {
-            bool alreadyHasRow = false;
-            for (const RowData& rd : rowData) {
-                if (rd.serviceNo == serviceNo) {
-                    alreadyHasRow = true;
-                    break;
-                }
-            }
-            if (!alreadyHasRow) {
-                RowData newRow;
-                newRow.serviceNo = serviceNo;
-                newRow.label = "";
-                newRow.isLoop = false;
-                newRow.firstSeenVisit = 1;
-                newRow.firstSeenIndex = 0;
-                rowData.push_back(newRow);
-            }
-        }
-    }
-    
-    // Build output rows
-    std::vector<BusServiceRow> rows;
-    for (const std::string& serviceNo : serviceOrder) {
-        // Collect rows for this service
-        std::vector<RowData*> serviceRows;
-        for (RowData& rd : rowData) {
-            if (rd.serviceNo == serviceNo) {
-                serviceRows.push_back(&rd);
-            }
-        }
-        
-        // Sort by visit then index
-        for (size_t i = 0; i < serviceRows.size(); ++i) {
-            for (size_t j = i + 1; j < serviceRows.size(); ++j) {
-                bool swap = false;
-                if (serviceRows[i]->firstSeenVisit > serviceRows[j]->firstSeenVisit) {
-                    swap = true;
-                } else if (serviceRows[i]->firstSeenVisit == serviceRows[j]->firstSeenVisit &&
-                          serviceRows[i]->firstSeenIndex > serviceRows[j]->firstSeenIndex) {
-                    swap = true;
-                }
-                if (swap) {
-                    RowData* tmp = serviceRows[i];
-                    serviceRows[i] = serviceRows[j];
-                    serviceRows[j] = tmp;
-                }
-            }
-        }
-        
-        for (RowData* data : serviceRows) {
-            // Sort arrivals by ETA
-            for (size_t i = 0; i < data->arrivals.size(); ++i) {
-                for (size_t j = i + 1; j < data->arrivals.size(); ++j) {
-                    if (data->arrivals[i].etaEpoch > data->arrivals[j].etaEpoch) {
-                        BusArrival tmp = data->arrivals[i];
-                        data->arrivals[i] = data->arrivals[j];
-                        data->arrivals[j] = tmp;
+        // Loop description fills a label that is still empty. A null
+        // LoopDesc leaves the line blank.
+        if (svc.isLoop && !svc.loopDesc.empty()) {
+            const std::string fallback = stripToPrefix(svc.loopDesc);
+            if (!fallback.empty()) {
+                for (size_t i = 0; i < kArrivalsPerService; ++i) {
+                    if (svc.arrivals[i].etaEpoch >= 0 && slotLabel[i].empty()) {
+                        slotLabel[i] = fallback;
                     }
                 }
             }
-            
+        }
+
+        for (size_t i = 0; i < kArrivalsPerService; ++i) {
+            if (svc.arrivals[i].etaEpoch < 0) {
+                continue;
+            }
+            const bool labelled = !slotLabel[i].empty();
+            RowAcc* found = nullptr;
+            for (RowAcc& row : acc) {
+                if (row.serviceNo != svc.serviceNo || row.label != slotLabel[i] ||
+                    row.visit != slotVisit[i]) {
+                    continue;
+                }
+                if (!labelled && row.entryKey != entry) {
+                    continue;
+                }
+                found = &row;
+                break;
+            }
+            if (found == nullptr) {
+                RowAcc row;
+                row.serviceNo = svc.serviceNo;
+                row.label = slotLabel[i];
+                row.visit = slotVisit[i];
+                row.isLoop = svc.isLoop;
+                row.entryKey = labelled ? kMergeEntries : entry;
+                row.firstIndex = nextIndex++;
+                acc.push_back(row);
+                found = &acc.back();
+            } else if (svc.isLoop) {
+                found->isLoop = true;
+            }
+            found->arrivals.push_back(svc.arrivals[i]);
+        }
+    }
+
+    for (size_t entry = 0; entry < services.size(); ++entry) {
+        const BusService& svc = services[entry];
+        bool already = false;
+        for (const RowAcc& row : acc) {
+            if (row.serviceNo == svc.serviceNo) {
+                already = true;
+                break;
+            }
+        }
+        if (!already) {
+            RowAcc row;
+            row.serviceNo = svc.serviceNo;
+            row.isLoop = svc.isLoop;
+            row.entryKey = entry;
+            row.firstIndex = nextIndex++;
+            acc.push_back(row);
+        }
+    }
+
+    std::vector<BusServiceRow> rows;
+    for (const std::string& serviceNo : serviceOrder) {
+        std::vector<size_t> idx;
+        for (size_t i = 0; i < acc.size(); ++i) {
+            if (acc[i].serviceNo == serviceNo) {
+                idx.push_back(i);
+            }
+        }
+        for (size_t i = 1; i < idx.size(); ++i) {
+            size_t key = idx[i];
+            size_t j = i;
+            while (j > 0) {
+                const int rankKey = acc[key].visit == "2" ? 1 : 0;
+                const int rankPrev = acc[idx[j - 1]].visit == "2" ? 1 : 0;
+                const bool earlier =
+                    rankKey < rankPrev ||
+                    (rankKey == rankPrev &&
+                     acc[key].firstIndex < acc[idx[j - 1]].firstIndex);
+                if (!earlier) {
+                    break;
+                }
+                idx[j] = idx[j - 1];
+                --j;
+            }
+            idx[j] = key;
+        }
+
+        for (size_t id : idx) {
+            RowAcc& data = acc[id];
+            sortArrivalsByEta(data.arrivals);
+            if (data.arrivals.size() > kArrivalsPerService) {
+                data.arrivals.resize(kArrivalsPerService);
+            }
             BusServiceRow row;
-            row.serviceNo = data->serviceNo;
-            row.label = data->label;
-            row.isLoop = data->isLoop;
-            
-            for (size_t i = 0; i < kArrivalsPerService && i < data->arrivals.size(); ++i) {
-                row.arrivals[i] = data->arrivals[i];
+            row.serviceNo = data.serviceNo;
+            row.label = data.label;
+            row.visitNumber = data.visit;
+            row.isLoop = data.isLoop;
+            for (size_t i = 0; i < data.arrivals.size(); ++i) {
+                row.arrivals[i] = data.arrivals[i];
             }
-            for (size_t i = data->arrivals.size(); i < kArrivalsPerService; ++i) {
-                row.arrivals[i] = BusArrival{};
-            }
-            
             rows.push_back(row);
         }
     }
-    
-    // For each service, find distinct non-empty labels and collect empty-label arrivals
-    struct ServiceLabelInfo {
-        std::string serviceNo;
-        std::vector<std::string> distinctLabels;
-        std::vector<BusArrival> emptyLabelArrivals;
-    };
-    std::vector<ServiceLabelInfo> labelInfo;
-    
-    for (const BusServiceRow& row : rows) {
-        ServiceLabelInfo* info = nullptr;
-        for (ServiceLabelInfo& si : labelInfo) {
-            if (si.serviceNo == row.serviceNo) {
-                info = &si;
-                break;
-            }
-        }
-        if (!info) {
-            ServiceLabelInfo newInfo;
-            newInfo.serviceNo = row.serviceNo;
-            labelInfo.push_back(newInfo);
-            info = &labelInfo.back();
-        }
-        
-        if (!row.label.empty()) {
-            bool found = false;
-            for (const std::string& lbl : info->distinctLabels) {
-                if (lbl == row.label) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                info->distinctLabels.push_back(row.label);
-            }
-        } else {
-            for (const BusArrival& arr : row.arrivals) {
-                if (arr.etaEpoch >= 0) {
-                    info->emptyLabelArrivals.push_back(arr);
-                }
-            }
-        }
+    return rows;
+}
+
+void pruneExpiredArrivals(std::vector<BusServiceRow>& rows, int64_t nowEpoch) {
+    if (nowEpoch < kClockSetEpoch) {
+        return;
     }
-    
-    // Identify services to merge (1 distinct label + has empty-label arrivals)
-    std::vector<std::string> servicesToMerge;
-    for (const ServiceLabelInfo& si : labelInfo) {
-        if (si.distinctLabels.size() == 1 && !si.emptyLabelArrivals.empty()) {
-            servicesToMerge.push_back(si.serviceNo);
-        }
-    }
-    
-    // Build final row list with merging
-    std::vector<BusServiceRow> mergedRows;
+    std::vector<BusServiceRow> kept;
+    kept.reserve(rows.size());
     for (BusServiceRow& row : rows) {
-        bool shouldMerge = false;
-        for (const std::string& svc : servicesToMerge) {
-            if (row.serviceNo == svc) {
-                shouldMerge = true;
-                break;
+        std::array<BusArrival, kArrivalsPerService> next{};
+        size_t n = 0;
+        for (const BusArrival& arrival : row.arrivals) {
+            if (arrival.etaEpoch < 0 || n >= kArrivalsPerService) {
+                continue;
             }
+            if (nowEpoch - arrival.etaEpoch > kEtaDropPastSeconds) {
+                continue;
+            }
+            next[n++] = arrival;
         }
-        
-        // Skip empty-label rows that will be merged
-        if (row.label.empty() && shouldMerge) {
+        if (n == 0) {
             continue;
         }
-        
-        // Merge empty-label arrivals into labeled row
-        if (!row.label.empty() && shouldMerge) {
-            std::vector<BusArrival> allArrivals;
-            for (const BusArrival& arr : row.arrivals) {
-                if (arr.etaEpoch >= 0) {
-                    allArrivals.push_back(arr);
-                }
-            }
-            
-            // Find empty-label arrivals for this service
-            for (const ServiceLabelInfo& si : labelInfo) {
-                if (si.serviceNo == row.serviceNo) {
-                    for (const BusArrival& arr : si.emptyLabelArrivals) {
-                        allArrivals.push_back(arr);
-                    }
-                    break;
-                }
-            }
-            
-            // Sort by ETA using bubble sort
-            for (size_t i = 0; i < allArrivals.size(); ++i) {
-                for (size_t j = i + 1; j < allArrivals.size(); ++j) {
-                    if (allArrivals[i].etaEpoch > allArrivals[j].etaEpoch) {
-                        BusArrival tmp = allArrivals[i];
-                        allArrivals[i] = allArrivals[j];
-                        allArrivals[j] = tmp;
-                    }
-                }
-            }
-            
-            for (size_t i = 0; i < kArrivalsPerService; ++i) {
-                if (i < allArrivals.size()) {
-                    row.arrivals[i] = allArrivals[i];
-                } else {
-                    row.arrivals[i] = BusArrival{};
-                }
-            }
-        }
-        
-        mergedRows.push_back(row);
+        row.arrivals = next;
+        kept.push_back(row);
     }
-    rows = mergedRows;
-    
-    // Determine which services should show labels
-    struct ServiceDisplayInfo {
-        std::string serviceNo;
-        std::vector<std::string> nonEmptyLabels;
-        bool isLoop = false;
-    };
-    std::vector<ServiceDisplayInfo> displayInfo;
-    
+    rows.swap(kept);
+}
+
+bool rowsHaveArrivals(const std::vector<BusServiceRow>& rows) {
     for (const BusServiceRow& row : rows) {
-        ServiceDisplayInfo* info = nullptr;
-        for (ServiceDisplayInfo& di : displayInfo) {
-            if (di.serviceNo == row.serviceNo) {
-                info = &di;
-                break;
+        for (const BusArrival& arrival : row.arrivals) {
+            if (arrival.etaEpoch >= 0) {
+                return true;
             }
-        }
-        if (!info) {
-            ServiceDisplayInfo newInfo;
-            newInfo.serviceNo = row.serviceNo;
-            newInfo.isLoop = false;
-            displayInfo.push_back(newInfo);
-            info = &displayInfo.back();
-        }
-        
-        if (!row.label.empty()) {
-            bool found = false;
-            for (const std::string& lbl : info->nonEmptyLabels) {
-                if (lbl == row.label) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                info->nonEmptyLabels.push_back(row.label);
-            }
-        }
-        if (row.isLoop) {
-            info->isLoop = true;
         }
     }
-    
-    // Clear labels for services that don't show labels
-    for (BusServiceRow& row : rows) {
-        bool showLabel = false;
-        for (const ServiceDisplayInfo& di : displayInfo) {
-            if (di.serviceNo == row.serviceNo) {
-                showLabel = di.isLoop || di.nonEmptyLabels.size() >= 2;
-                break;
-            }
+    return false;
+}
+
+bool rowAllTerminating(const BusServiceRow& row) {
+    bool any = false;
+    for (const BusArrival& arrival : row.arrivals) {
+        if (arrival.etaEpoch < 0) {
+            continue;
         }
-        if (!showLabel) {
-            row.label.clear();
+        any = true;
+        if (!arrival.terminating) {
+            return false;
         }
     }
-    
-    return rows;
+    return any;
 }
 
 size_t servicePageCount(size_t serviceCount, size_t pageSize) {
     if (pageSize == 0 || serviceCount == 0) {
         return 0;
     }
-    // Simple calculation - actual pages may differ due to service grouping
-    // but this is used for initial estimates
     return (serviceCount + pageSize - 1) / pageSize;
 }
 
@@ -474,36 +397,26 @@ size_t servicePageCount(const std::vector<BusServiceRow>& rows, size_t pageSize)
     if (pageSize == 0 || rows.empty()) {
         return 0;
     }
-    
-    // Simulate paging with service grouping to get accurate page count
+
     size_t pageCount = 0;
     size_t currentPageSize = 0;
-    
-    for (size_t i = 0; i < rows.size(); ) {
+
+    for (size_t i = 0; i < rows.size();) {
         const std::string& serviceNo = rows[i].serviceNo;
-        
-        // Count consecutive rows with same serviceNo
         size_t serviceRowCount = 1;
-        while (i + serviceRowCount < rows.size() && 
+        while (i + serviceRowCount < rows.size() &&
                rows[i + serviceRowCount].serviceNo == serviceNo) {
             ++serviceRowCount;
         }
-        
-        // If service rows fit on current page, add them
+
         if (currentPageSize + serviceRowCount <= pageSize) {
             currentPageSize += serviceRowCount;
             i += serviceRowCount;
-        }
-        // If service rows would straddle boundary but fit on next page
-        else if (currentPageSize > 0 && serviceRowCount <= pageSize) {
-            // Start new page with this service
+        } else if (currentPageSize > 0 && serviceRowCount <= pageSize) {
             ++pageCount;
             currentPageSize = serviceRowCount;
             i += serviceRowCount;
-        }
-        // Service is too large for one page, split it
-        else {
-            // Fill current page as much as possible
+        } else {
             while (currentPageSize < pageSize && i < rows.size()) {
                 ++currentPageSize;
                 ++i;
@@ -512,57 +425,44 @@ size_t servicePageCount(const std::vector<BusServiceRow>& rows, size_t pageSize)
             currentPageSize = 0;
         }
     }
-    
-    // Add final page if non-empty
+
     if (currentPageSize > 0) {
         ++pageCount;
     }
-    
     return pageCount;
 }
 
 std::vector<BusServiceRow> selectServicePage(
     const std::vector<BusServiceRow>& rows, size_t pageSize, size_t page) {
     std::vector<BusServiceRow> selected;
-    
     if (pageSize == 0 || rows.empty()) {
         return selected;
     }
-    
-    // Build pages respecting service boundaries
+
     std::vector<std::vector<BusServiceRow>> pages;
     std::vector<BusServiceRow> currentPage;
-    
-    for (size_t i = 0; i < rows.size(); ) {
+
+    for (size_t i = 0; i < rows.size();) {
         const std::string& serviceNo = rows[i].serviceNo;
-        
-        // Count consecutive rows with same serviceNo
         size_t serviceRowCount = 1;
-        while (i + serviceRowCount < rows.size() && 
+        while (i + serviceRowCount < rows.size() &&
                rows[i + serviceRowCount].serviceNo == serviceNo) {
             ++serviceRowCount;
         }
-        
-        // If service rows fit on current page, add them
+
         if (currentPage.size() + serviceRowCount <= pageSize) {
             for (size_t j = 0; j < serviceRowCount; ++j) {
                 currentPage.push_back(rows[i + j]);
             }
             i += serviceRowCount;
-        }
-        // If service rows would straddle boundary but fit on next page
-        else if (!currentPage.empty() && serviceRowCount <= pageSize) {
-            // Push current page and start new one with this service
+        } else if (!currentPage.empty() && serviceRowCount <= pageSize) {
             pages.push_back(currentPage);
             currentPage.clear();
             for (size_t j = 0; j < serviceRowCount; ++j) {
                 currentPage.push_back(rows[i + j]);
             }
             i += serviceRowCount;
-        }
-        // Service is too large for one page, split it
-        else {
-            // Fill current page as much as possible
+        } else {
             while (currentPage.size() < pageSize && i < rows.size()) {
                 currentPage.push_back(rows[i++]);
             }
@@ -572,17 +472,14 @@ std::vector<BusServiceRow> selectServicePage(
             }
         }
     }
-    
-    // Add final page if non-empty
+
     if (!currentPage.empty()) {
         pages.push_back(currentPage);
     }
-    
-    // Return requested page
     if (page < pages.size()) {
         return pages[page];
     }
-    return selected;  // Empty if page out of range
+    return selected;
 }
 
 std::vector<BusService> selectServicePage(
@@ -596,14 +493,18 @@ std::vector<BusService> selectServicePage(
 }
 
 bool shouldShowVisit2Marker(const BusServiceRow& row) {
-    bool hasNonEmptyArrival = false;
-    for (size_t i = 0; i < kArrivalsPerService; ++i) {
-        if (row.arrivals[i].etaEpoch >= 0) {
-            hasNonEmptyArrival = true;
-            if (row.arrivals[i].visitNumber != "2") {
-                return false;  // Found non-visit-2, don't show marker
-            }
+    if (row.label.empty() || rowAllTerminating(row)) {
+        return false;
+    }
+    bool hasArrival = false;
+    for (const BusArrival& arrival : row.arrivals) {
+        if (arrival.etaEpoch < 0) {
+            continue;
+        }
+        hasArrival = true;
+        if (arrival.visitNumber != "2") {
+            return false;
         }
     }
-    return hasNonEmptyArrival;  // Show marker only if has arrivals and all are visit 2
+    return hasArrival;
 }

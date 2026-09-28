@@ -1,0 +1,58 @@
+{
+  "busStops": [
+    {
+      "BusStopCode": "52109",
+      "UpdatedAt": "2026-09-28T16:40:00.000000+08:00",
+      "Services": [
+        {
+          "ServiceNo": "10",
+          "Loop": {"IsLoop": false, "LoopDesc": null},
+          "NextBus": {
+            "EstimatedArrival": "2026-09-28T16:42:00+08:00",
+            "Load": "SEA",
+            "Type": "SD",
+            "Label": "To HarbourFront Int",
+            "VisitNumber": "1",
+            "Terminating": true
+          },
+          "NextBus2": {
+            "EstimatedArrival": "2026-09-28T16:50:00+08:00",
+            "Load": "SDA",
+            "Type": "DD",
+            "Label": "To HarbourFront Int",
+            "VisitNumber": "1",
+            "Terminating": false
+          },
+          "NextBus3": {
+            "EstimatedArrival": "2026-09-28T17:02:00+08:00",
+            "Load": "LSD",
+            "Type": "SD",
+            "Label": "To HarbourFront Int",
+            "VisitNumber": "1",
+            "Terminating": false
+          }
+        },
+        {
+          "ServiceNo": "12",
+          "Loop": {"IsLoop": true, "LoopDesc": "Depot"},
+          "NextBus": {
+            "EstimatedArrival": "2026-09-28T16:44:00+08:00",
+            "Load": "SEA",
+            "Type": "SD",
+            "Label": "To Depot",
+            "VisitNumber": "2",
+            "Terminating": true
+          },
+          "NextBus2": {
+            "EstimatedArrival": "2026-09-28T16:54:00+08:00",
+            "Load": "SDA",
+            "Type": "DD",
+            "Label": "To Depot",
+            "VisitNumber": "2",
+            "Terminating": true
+          }
+        }
+      ]
+    }
+  ]
+}

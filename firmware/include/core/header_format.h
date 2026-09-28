@@ -3,57 +3,59 @@
 #include <cstdio>
 #include <string>
 
+#include "core/backoff_scheduler.h"
+#include "core/night_window.h"
 #include "core/text_utils.h"
 
-// Builds and truncates a header string from stop name, page indicator, and age.
-// Priority: always keep age, drop page indicator first, then trim name.
-// width_callback measures text width (e.g., canvas.textWidth()).
-// Returns: formatted header that fits in maxWidth.
-template<typename WidthFunc>
+// Header for the arrivals screen.
+// At a data age of kHeaderStaleNoteMs or more, the time of UpdatedAt is
+// appended as " as of HH:MM". When that does not fit it shortens to " HH:MM".
+// The page indicator is dropped before the stop name is trimmed, and the
+// time is kept until the name has been trimmed away.
+template <typename WidthFunc>
 std::string buildHeader(const std::string& stopName, size_t currentPage,
-                        size_t totalPages, uint32_t dataAgeMs, int maxWidth,
+                        size_t totalPages, uint32_t dataAgeMs,
+                        int64_t updatedAtEpoch, int maxWidth,
                         WidthFunc widthCallback) {
-    // Build age suffix (empty if data is fresh)
-    std::string ageSuffix;
-    if (dataAgeMs > 60000) {
-        uint32_t ageSec = dataAgeMs / 1000;
-        char buf[16];
-        if (ageSec < 120) {
-            std::snprintf(buf, sizeof(buf), " %us", static_cast<unsigned>(ageSec));
-        } else {
-            std::snprintf(buf, sizeof(buf), " %um",
-                         static_cast<unsigned>(ageSec / 60));
+    std::string longSuffix;
+    std::string shortSuffix;
+    if (dataAgeMs >= kHeaderStaleNoteMs && updatedAtEpoch >= 0) {
+        const std::string hm = formatLocalHm(updatedAtEpoch);
+        if (!hm.empty()) {
+            longSuffix = " as of " + hm;
+            shortSuffix = " " + hm;
         }
-        ageSuffix = buf;
     }
-    
-    // Build page indicator
+
     char pageIndicator[16];
     std::snprintf(pageIndicator, sizeof(pageIndicator), " (%zu/%zu)",
-                 currentPage + 1, totalPages);
-    
-    // Try full header: name + page + age
-    std::string full = stopName + pageIndicator + ageSuffix;
-    if (widthCallback(full.c_str()) <= maxWidth) {
-        return full;
+                  currentPage + 1, totalPages);
+
+    if (longSuffix.empty()) {
+        const std::string full = stopName + pageIndicator;
+        if (widthCallback(full.c_str()) <= maxWidth) {
+            return full;
+        }
+        return truncateText(stopName, maxWidth, widthCallback);
     }
-    
-    // Drop page indicator, keep age: name + age
-    std::string withoutPage = stopName + ageSuffix;
-    if (widthCallback(withoutPage.c_str()) <= maxWidth) {
-        return withoutPage;
+
+    const std::string withPage = stopName + pageIndicator + longSuffix;
+    if (widthCallback(withPage.c_str()) <= maxWidth) {
+        return withPage;
     }
-    
-    // Truncate name to fit with age (always keep age)
-    // Calculate width available for name
-    int ageWidth = widthCallback(ageSuffix.c_str());
-    int nameMaxWidth = maxWidth - ageWidth;
-    
-    // Always keep age, even if it means name becomes a single char or empty
+    const std::string withLong = stopName + longSuffix;
+    if (widthCallback(withLong.c_str()) <= maxWidth) {
+        return withLong;
+    }
+    const std::string withShort = stopName + shortSuffix;
+    if (widthCallback(withShort.c_str()) <= maxWidth) {
+        return withShort;
+    }
+
+    const int suffixWidth = widthCallback(shortSuffix.c_str());
+    const int nameMaxWidth = maxWidth - suffixWidth;
     if (nameMaxWidth <= 0) {
-        return ageSuffix;  // Only age fits
+        return shortSuffix;
     }
-    
-    std::string truncatedName = truncateText(stopName, nameMaxWidth, widthCallback);
-    return truncatedName + ageSuffix;
+    return truncateText(stopName, nameMaxWidth, widthCallback) + shortSuffix;
 }

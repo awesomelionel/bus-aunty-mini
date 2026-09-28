@@ -1,0 +1,30 @@
+{
+  "busStops": [
+    {
+      "BusStopCode": "52109",
+      "UpdatedAt": "2026-09-28T16:40:00.000000+08:00",
+      "Services": [
+        {
+          "ServiceNo": "36",
+          "Loop": {"IsLoop": true, "LoopDesc": "Prince Edward"},
+          "NextBus": {
+            "EstimatedArrival": "2026-09-28T16:48:00+08:00",
+            "Load": "SDA",
+            "Type": "DD",
+            "Label": "To Prince Edward Rd Stn Exit 2",
+            "VisitNumber": "2",
+            "Terminating": false
+          },
+          "NextBus2": {
+            "EstimatedArrival": "2026-09-28T16:58:00+08:00",
+            "Load": "SEA",
+            "Type": "SD",
+            "Label": "To Prince Edward Rd Stn Exit 2",
+            "VisitNumber": "2",
+            "Terminating": false
+          }
+        }
+      ]
+    }
+  ]
+}

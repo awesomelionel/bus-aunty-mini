@@ -73,6 +73,34 @@ std::string truncateLabel(const std::string& text, int maxWidth,
     });
 }
 
+// One label line for both themes. "Ends here" replaces the destination when
+// every arrival on the row terminates there, and that line has no "2nd".
+template <typename Color>
+void drawLabelLine(const BusServiceRow& row, int labelX, int labelY,
+                   int maxWidth, Color ink, Color marker) {
+    const bool endsHere = rowAllTerminating(row);
+    if (!endsHere && row.label.empty()) {
+        return;
+    }
+#if BUS_AUNTY_SHOW_VISIT_MARKER
+    const bool markerOn = !endsHere && shouldShowVisit2Marker(row);
+#else
+    const bool markerOn = false;
+#endif
+    const std::string text = endsHere ? std::string("Ends here") : row.label;
+    canvas.setFont(labelFont());
+    canvas.setTextDatum(top_left);
+    const std::string shown =
+        truncateLabel(text, maxWidth, labelFont(), markerOn);
+    canvas.setTextColor(ink);
+    canvas.drawString(shown.c_str(), labelX, labelY);
+    if (markerOn) {
+        canvas.setTextColor(marker);
+        canvas.drawString(" 2nd", labelX + canvas.textWidth(shown.c_str()),
+                          labelY);
+    }
+}
+
 // A solid triangle of `size` pixels across, centred on the point given. This
 // is what stands in for an arrow glyph, which the DejaVu fonts do not carry.
 void drawArrow(int centerX, int centerY, int size, ButtonArrow arrow) {
@@ -204,6 +232,10 @@ constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
 
 // Each arrival is tinted by how full that bus is. Colour carries the load and
 // nothing else, so an arriving bus is left to read as "Arr" on its own.
+// RGB565 grey. After the panel's 8-bit quantize this is ~(146,146,170),
+// about 6.9:1 on black. TFT_DARKGREY quantizes to ~4.0:1, which is too low.
+constexpr int kTerminatingEta = 0x8410;
+
 uint16_t loadColor(BusLoad load) {
     switch (load) {
         case BusLoad::SeatsAvailable:
@@ -251,7 +283,9 @@ constexpr Palette kNightPalette = {
     /*hi=*/0xFFFFFF,     /*lo=*/0x5A5A5A,
     /*capA=*/0x000000,   /*capB=*/0x000000, /*capInk=*/0xFFFF00,
     /*seats=*/0x00FF00,  /*stand=*/0xFFFF00, /*limit=*/0xFF5555,
-    /*dim=*/0x7A7A7A,
+    // 0x7A7A7A quantises under RGB332 to about 3.9:1 on black. 0xA0A0A0
+    // lands on a grey that stays above 4.5:1 after the 8-bit crush.
+    /*dim=*/0xA0A0A0,
 };
 
 constexpr int kTitleBarHeight = 18;
@@ -334,17 +368,29 @@ constexpr int kBatteryRightMargin = 2;
 constexpr int kBatteryY = 2;
 constexpr int kBatteryLowPercent = 20;
 
+// Room for the Wi-Fi-off mark that sits just left of the battery.
+constexpr int kWifiOffSpan = 14;
+
 // The service rows and the header end a few pixels short of the bottom edge,
 // leaving room for an indicator that shows which page of a long service list
 // is on screen.
-void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY) {
+void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY,
+                  bool wifiOffline) {
     constexpr int kDotRadius = 2;
     constexpr int kDotSpacing = 8;
 
     int y = pageDotsY;
-    // Position dots in free space to the left of battery
-    int x = screenWidth() - kBatteryBodyWidth - kBatteryTipWidth - 
-            kBatteryRightMargin - 4 - static_cast<int>(totalPages) * kDotSpacing;
+    const int batteryLeft = screenWidth() - kBatteryBodyWidth - kBatteryTipWidth -
+                            kBatteryRightMargin;
+    const int reserved = batteryLeft - (wifiOffline ? kWifiOffSpan : 0) - 4;
+    int x = reserved - static_cast<int>(totalPages) * kDotSpacing;
+    // The last dot's right edge has to stay clear of the battery (and the
+    // Wi-Fi mark). A long page list shifts left rather than painting over it.
+    const int lastRight =
+        x + static_cast<int>(totalPages - 1) * kDotSpacing + kDotRadius;
+    if (lastRight > reserved) {
+        x -= lastRight - reserved;
+    }
     for (size_t i = 0; i < totalPages; ++i) {
         if (i == currentPage) {
             canvas.fillCircle(x, y, kDotRadius, TFT_WHITE);
@@ -359,6 +405,16 @@ void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY) {
 // name cannot run underneath it.
 constexpr int kHeaderRightPad =
     kBatteryBodyWidth + kBatteryTipWidth + kBatteryRightMargin + 4;
+
+void drawWifiOff(int batteryLeft) {
+    const int x = batteryLeft - kWifiOffSpan + 2;
+    const int y = kBatteryY;
+    canvas.drawRect(x, y, 10, kBatteryHeight, TFT_WHITE);
+    for (int i = 0; i < 8; ++i) {
+        canvas.fillRect(x + 1 + i, y + 1 + (i * (kBatteryHeight - 3)) / 7, 1, 1,
+                        TFT_WHITE);
+    }
+}
 
 void drawBattery(const hal::PowerStatus& power) {
     if (power.percent < 0) {
@@ -433,11 +489,10 @@ void drawFramedArrivals(const std::string& stopLabel,
                         int64_t nowEpoch, size_t currentStopIndex,
                         size_t totalStops, size_t currentPage,
                         size_t totalPages, const hal::PowerStatus& power,
-                        uint32_t dataAgeMs) {
-    // Check if any row has a label, then select the appropriate layout
+                        uint32_t dataAgeMs, int64_t updatedAtEpoch) {
     bool hasLabels = false;
     for (const BusServiceRow& row : rows) {
-        if (!row.label.empty()) {
+        if (rowShowsLabel(row)) {
             hasLabels = true;
             break;
         }
@@ -467,7 +522,7 @@ void drawFramedArrivals(const std::string& stopLabel,
     constexpr int kTitleMaxWidth = 268;  // 276 - 4 - bold margin, keeps age
     
     std::string title = buildHeader(stopLabel, currentStopIndex, totalStops,
-                                   dataAgeMs, kTitleMaxWidth,
+                                   dataAgeMs, updatedAtEpoch, kTitleMaxWidth,
                                    [](const char* s) { return canvas.textWidth(s); });
     
     drawBoldString(title.c_str(), kTitleStartX, 3, /*growLeft=*/false);
@@ -518,34 +573,16 @@ void drawFramedArrivals(const std::string& stopLabel,
         drawBoldString(row.serviceNo.c_str(), layout.serviceColX + 2,
                        y, /*growLeft=*/false);
 
-        // Draw label below service number if present (Win95 theme)
-        if (!row.label.empty()) {
+        if (rowShowsLabel(row)) {
             const int labelX = layout.serviceColX + 2;
             const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
             const int maxLabelWidth = screenWidth() - labelX - 8;
-            
-#if BUS_AUNTY_SHOW_VISIT_MARKER
-            bool hasVisit2 = shouldShowVisit2Marker(row);
-#else
-            bool hasVisit2 = false;
-#endif
-            
-            canvas.setFont(labelFont());
-            std::string truncated = truncateLabel(row.label, maxLabelWidth, labelFont(), hasVisit2);
-            canvas.setTextColor(p.ink);
-            canvas.drawString(truncated.c_str(), labelX, labelY);
-            
-#if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals
-            // Navy for day palette, cyan for night (higher contrast)
-            if (hasVisit2) {
-                int markerX = labelX + canvas.textWidth(truncated.c_str());
-                uint32_t markerColor = (p.capA == 0x000080) ? 0x000080 : 0x00FFFF;
-                canvas.setTextColor(markerColor);
-                canvas.drawString(" 2nd", markerX, labelY);
-                canvas.setTextColor(p.ink);  // Restore color
-            }
-#endif
+            // Day marker is the title-bar navy. Night uses cyan as RGB888:
+            // a uint16 TFT_CYAN stored in a uint32 is read as dark blue.
+            const uint32_t markerColor =
+                (p.capA == 0x000080) ? 0x000080 : 0x00FFFF;
+            drawLabelLine(row, labelX, labelY, maxLabelWidth, p.ink,
+                          markerColor);
         }
 
         canvas.setFont(arrivalsFont());
@@ -555,11 +592,13 @@ void drawFramedArrivals(const std::string& stopLabel,
             const std::string eta = formatEtaMinutes(arrival.etaEpoch,
                                                      nowEpoch);
             uint32_t tint = p.dim;
-            switch (arrival.load) {
-                case BusLoad::SeatsAvailable: tint = p.seats; break;
-                case BusLoad::StandingAvailable: tint = p.stand; break;
-                case BusLoad::LimitedStanding: tint = p.limit; break;
-                case BusLoad::Unknown: tint = p.ink; break;
+            if (!arrival.terminating) {
+                switch (arrival.load) {
+                    case BusLoad::SeatsAvailable: tint = p.seats; break;
+                    case BusLoad::StandingAvailable: tint = p.stand; break;
+                    case BusLoad::LimitedStanding: tint = p.limit; break;
+                    case BusLoad::Unknown: tint = p.ink; break;
+                }
             }
             canvas.setTextColor(tint);
             drawBoldString(eta.c_str(), layout.etaColRightX[col], y,
@@ -610,7 +649,7 @@ void drawFramedArrivals(const std::string& stopLabel,
         // core function for one modulo.
         const int minute = static_cast<int>(
             ((nowEpoch + kLocalUtcOffsetSeconds) % 3600) / 60);
-        char clock[6];
+        char clock[24];
         std::snprintf(clock, sizeof(clock), "%02d:%02d", hour, minute);
         canvas.setFont(&fonts::DejaVu12);
         canvas.setTextColor(p.ink);
@@ -821,10 +860,12 @@ void displayShowArrivals(const std::string& stopLabel,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
                           size_t totalPages, const hal::PowerStatus& power,
-                          uint32_t dataAgeMs) {
+                          uint32_t dataAgeMs, int64_t updatedAtEpoch,
+                          bool wifiOffline) {
     if (win95Theme) {
         drawFramedArrivals(stopLabel, rows, nowEpoch, currentStopIndex,
-                           totalStops, currentPage, totalPages, power, dataAgeMs);
+                           totalStops, currentPage, totalPages, power, dataAgeMs,
+                           updatedAtEpoch);
         return;
     }
 
@@ -832,10 +873,9 @@ void displayShowArrivals(const std::string& stopLabel,
     canvas.setFont(arrivalsFont());
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
-    // Check if any row has a label, then select the appropriate layout
     bool hasLabels = false;
     for (const BusServiceRow& row : rows) {
-        if (!row.label.empty()) {
+        if (rowShowsLabel(row)) {
             hasLabels = true;
             break;
         }
@@ -847,15 +887,21 @@ void displayShowArrivals(const std::string& stopLabel,
     canvas.setTextDatum(top_center);
     canvas.setFont(arrivalsFont());
     
-    // Build header with intelligent truncation
-    int maxHeaderWidth = screenWidth() - kHeaderRightPad - 4;
+    const int rightPad = kHeaderRightPad + (wifiOffline ? kWifiOffSpan : 0);
+    int maxHeaderWidth = screenWidth() - rightPad - 4;
     std::string header = buildHeader(stopLabel, currentStopIndex, totalStops,
-                                    dataAgeMs, maxHeaderWidth,
+                                    dataAgeMs, updatedAtEpoch, maxHeaderWidth,
                                     [](const char* s) { return canvas.textWidth(s); });
-    
-    canvas.drawString(header.c_str(), layout.headerCenterX, 0);
+
+    const int headerCenterX = (screenWidth() - rightPad) / 2;
+    canvas.drawString(header.c_str(), headerCenterX, 0);
 
     drawBattery(power);
+    if (wifiOffline) {
+        const int batteryLeft = screenWidth() - kBatteryBodyWidth -
+                                kBatteryTipWidth - kBatteryRightMargin;
+        drawWifiOff(batteryLeft);
+    }
     
     for (size_t i = 0;
          i < rows.size() && i < layout.servicesPerScreen; ++i) {
@@ -867,32 +913,12 @@ void displayShowArrivals(const std::string& stopLabel,
         canvas.setTextDatum(top_left);
         canvas.drawString(row.serviceNo.c_str(), layout.serviceColX, y);
 
-        // Draw label below service number if present
-        if (!row.label.empty()) {
+        if (rowShowsLabel(row)) {
             const int labelX = layout.serviceColX;
             const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
-            const int maxLabelWidth = board().screenWidth - labelX - 
-                                      (board().arrivalsFontHeight >= 24 ? 8 : 8);
-            
-#if BUS_AUNTY_SHOW_VISIT_MARKER
-            bool hasVisit2 = shouldShowVisit2Marker(row);
-#else
-            bool hasVisit2 = false;
-#endif
-            
-            canvas.setFont(labelFont());
-            std::string truncated = truncateLabel(row.label, maxLabelWidth, labelFont(), hasVisit2);
-            canvas.drawString(truncated.c_str(), labelX, labelY);
-            
-#if BUS_AUNTY_SHOW_VISIT_MARKER
-            // Add "2nd" marker for second-visit arrivals in cyan to distinguish from label
-            if (hasVisit2) {
-                int markerX = labelX + canvas.textWidth(truncated.c_str());
-                canvas.setTextColor(TFT_CYAN, TFT_BLACK);
-                canvas.drawString(" 2nd", markerX, labelY);
-                canvas.setTextColor(TFT_WHITE, TFT_BLACK);  // Restore color
-            }
-#endif
+            const int maxLabelWidth = screenWidth() - labelX - 8;
+            drawLabelLine(row, labelX, labelY, maxLabelWidth, TFT_WHITE,
+                          TFT_CYAN);
         }
 
         canvas.setFont(arrivalsFont());
@@ -903,8 +929,14 @@ void displayShowArrivals(const std::string& stopLabel,
 
             // Single argument leaves the text background transparent, which
             // the second pass below depends on. Safe because every frame
-            // starts from a cleared sprite.
-            canvas.setTextColor(loadColor(arrival.load));
+            // starts from a cleared sprite. A terminating bus is dimmed
+            // grey (TFT_DARKGREY stays above 4.5:1 on black after RGB332)
+            // instead of its load colour.
+            // TFT_DARKGREY (0x7BEF) quantizes to about 4.0:1 on black in
+            // RGB332, under the 4.5:1 floor. 0x8410 lands on the next grey
+            // and stays near 6.9:1, still dimmer than every load colour.
+            canvas.setTextColor(arrival.terminating ? kTerminatingEta
+                                                    : loadColor(arrival.load));
             canvas.drawString(eta.c_str(), layout.etaColRightX[col], y);
 
             // Colour is spoken for by load, so an arriving bus is emphasised
@@ -921,7 +953,7 @@ void displayShowArrivals(const std::string& stopLabel,
     if (totalPages > 1) {
         // Draw page dots in header area, to the left of battery
         const int dotsY = kBatteryY + kBatteryHeight / 2;
-        drawPageDots(currentPage, totalPages, dotsY);
+        drawPageDots(currentPage, totalPages, dotsY, wifiOffline);
     }
 
     canvas.pushSprite(0, 0);
