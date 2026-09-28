@@ -7,6 +7,10 @@
 #include "core/iso8601.h"
 #include "core/night_window.h"
 
+#ifdef ESP32
+#include <Stream.h>
+#endif
+
 namespace {
 
 void sortArrivalsByEta(std::vector<BusArrival>& items) {
@@ -89,19 +93,19 @@ constexpr size_t kMergeEntries = static_cast<size_t>(-1);
 
 }  // namespace
 
-ParsedBusStop parseBusArrivalResponse(const std::string& json,
-                                       const std::string& expectedStopCode) {
-    ParsedBusStop result;
-
-    JsonDocument filter;
-    buildArrivalFilter(filter);
-
-    JsonDocument doc;
-    DeserializationError err =
-        deserializeJson(doc, json, DeserializationOption::Filter(filter));
-    if (err) {
-        return result;
+JsonDocument& arrivalFilter() {
+    static JsonDocument filter;
+    static bool built = false;
+    if (!built) {
+        buildArrivalFilter(filter);
+        built = true;
     }
+    return filter;
+}
+
+ParsedBusStop parsedFromDoc(const JsonDocument& doc,
+                            const std::string& expectedStopCode) {
+    ParsedBusStop result;
 
     for (JsonObjectConst stop : doc["busStops"].as<JsonArrayConst>()) {
         JsonVariantConst codeVar = stop["BusStopCode"];
@@ -139,15 +143,45 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
             svc.labels[0] = readLabel(service["NextBus"]);
             svc.labels[1] = readLabel(service["NextBus2"]);
             svc.labels[2] = readLabel(service["NextBus3"]);
+            if (result.services.size() >= kMaxServicesPerStop) {
+                break;
+            }
             result.services.push_back(svc);
         }
         result.rows = flattenToRows(result.services);
+        if (result.rows.size() > kMaxRowsPerStop) {
+            result.rows.resize(kMaxRowsPerStop);
+        }
         result.valid = true;
         break;
     }
 
     return result;
 }
+
+ParsedBusStop parseBusArrivalResponse(const std::string& json,
+                                       const std::string& expectedStopCode) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(
+        doc, json, DeserializationOption::Filter(arrivalFilter()));
+    if (err) {
+        return ParsedBusStop();
+    }
+    return parsedFromDoc(doc, expectedStopCode);
+}
+
+#ifdef ESP32
+ParsedBusStop parseBusArrivalStream(Stream& input,
+                                    const std::string& expectedStopCode) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(
+        doc, input, DeserializationOption::Filter(arrivalFilter()));
+    if (err) {
+        return ParsedBusStop();
+    }
+    return parsedFromDoc(doc, expectedStopCode);
+}
+#endif
 
 BusLoad parseBusLoad(const std::string& raw) {
     if (raw == "SEA") {
@@ -295,16 +329,22 @@ std::vector<BusServiceRow> flattenToRows(const std::vector<BusService>& services
                 idx.push_back(i);
             }
         }
+        // Visit 1 before visit 2, then label, then the order the row was
+        // first created. Alphabetical labels stay put when the lead bus
+        // changes slot. v2 1.08 keeps first-seen order instead.
         for (size_t i = 1; i < idx.size(); ++i) {
             size_t key = idx[i];
             size_t j = i;
             while (j > 0) {
-                const int rankKey = acc[key].visit == "2" ? 1 : 0;
-                const int rankPrev = acc[idx[j - 1]].visit == "2" ? 1 : 0;
+                const RowAcc& a = acc[key];
+                const RowAcc& b = acc[idx[j - 1]];
+                const int rankA = a.visit == "2" ? 1 : 0;
+                const int rankB = b.visit == "2" ? 1 : 0;
                 const bool earlier =
-                    rankKey < rankPrev ||
-                    (rankKey == rankPrev &&
-                     acc[key].firstIndex < acc[idx[j - 1]].firstIndex);
+                    rankA < rankB ||
+                    (rankA == rankB && a.label < b.label) ||
+                    (rankA == rankB && a.label == b.label &&
+                     a.firstIndex < b.firstIndex);
                 if (!earlier) {
                     break;
                 }
@@ -384,13 +424,6 @@ bool rowAllTerminating(const BusServiceRow& row) {
         }
     }
     return any;
-}
-
-size_t servicePageCount(size_t serviceCount, size_t pageSize) {
-    if (pageSize == 0 || serviceCount == 0) {
-        return 0;
-    }
-    return (serviceCount + pageSize - 1) / pageSize;
 }
 
 size_t servicePageCount(const std::vector<BusServiceRow>& rows, size_t pageSize) {
@@ -478,16 +511,6 @@ std::vector<BusServiceRow> selectServicePage(
     }
     if (page < pages.size()) {
         return pages[page];
-    }
-    return selected;
-}
-
-std::vector<BusService> selectServicePage(
-    const std::vector<BusService>& services, size_t pageSize, size_t page) {
-    std::vector<BusService> selected;
-    size_t start = page * pageSize;
-    for (size_t i = start; i < services.size() && i < start + pageSize; ++i) {
-        selected.push_back(services[i]);
     }
     return selected;
 }

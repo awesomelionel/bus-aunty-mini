@@ -1,3 +1,7 @@
+#include <fstream>
+#include <sstream>
+#include <string>
+
 #include <unity.h>
 
 #include "core/arrival_parser.h"
@@ -185,48 +189,43 @@ void test_matches_numeric_bus_stop_code_with_leading_zero() {
     TEST_ASSERT_EQUAL_STRING("01012", result.busStopCode.c_str());
 }
 
-void test_select_display_services_caps_at_six() {
-    std::vector<BusService> services;
-    for (int i = 0; i < 9; ++i) {
-        BusService svc;
-        svc.serviceNo = std::to_string(i);
-        services.push_back(svc);
+static std::vector<BusServiceRow> makeRows(size_t count) {
+    std::vector<BusServiceRow> rows;
+    for (size_t i = 0; i < count; ++i) {
+        BusServiceRow row;
+        row.serviceNo = std::to_string(i);
+        rows.push_back(row);
     }
-    std::vector<BusService> selected = selectServicePage(services, 6, 0);
+    return rows;
+}
+
+void test_select_display_services_caps_at_six() {
+    std::vector<BusServiceRow> rows = makeRows(9);
+    std::vector<BusServiceRow> selected = selectServicePage(rows, 6, 0);
     TEST_ASSERT_EQUAL(6, selected.size());
     TEST_ASSERT_EQUAL_STRING("0", selected[0].serviceNo.c_str());
     TEST_ASSERT_EQUAL_STRING("5", selected[5].serviceNo.c_str());
 }
 
-static std::vector<BusService> makeServices(size_t count) {
-    std::vector<BusService> services;
-    for (size_t i = 0; i < count; ++i) {
-        BusService svc;
-        svc.serviceNo = std::to_string(i);
-        services.push_back(svc);
-    }
-    return services;
-}
-
 void test_page_count_rounds_up() {
-    TEST_ASSERT_EQUAL_UINT32(0, servicePageCount(0, 6));
-    TEST_ASSERT_EQUAL_UINT32(1, servicePageCount(1, 6));
-    TEST_ASSERT_EQUAL_UINT32(1, servicePageCount(6, 6));
-    TEST_ASSERT_EQUAL_UINT32(2, servicePageCount(7, 6));
-    TEST_ASSERT_EQUAL_UINT32(3, servicePageCount(13, 6));
+    TEST_ASSERT_EQUAL_UINT32(0, servicePageCount(makeRows(0), 6));
+    TEST_ASSERT_EQUAL_UINT32(1, servicePageCount(makeRows(1), 6));
+    TEST_ASSERT_EQUAL_UINT32(1, servicePageCount(makeRows(6), 6));
+    TEST_ASSERT_EQUAL_UINT32(2, servicePageCount(makeRows(7), 6));
+    TEST_ASSERT_EQUAL_UINT32(3, servicePageCount(makeRows(13), 6));
 }
 
 void test_second_page_continues_where_first_ended() {
-    std::vector<BusService> services = makeServices(8);
-    std::vector<BusService> page = selectServicePage(services, 6, 1);
+    std::vector<BusServiceRow> rows = makeRows(8);
+    std::vector<BusServiceRow> page = selectServicePage(rows, 6, 1);
     TEST_ASSERT_EQUAL_UINT32(2, page.size());
     TEST_ASSERT_EQUAL_STRING("6", page[0].serviceNo.c_str());
     TEST_ASSERT_EQUAL_STRING("7", page[1].serviceNo.c_str());
 }
 
 void test_page_past_the_end_is_empty() {
-    std::vector<BusService> services = makeServices(8);
-    TEST_ASSERT_EQUAL_UINT32(0, selectServicePage(services, 6, 2).size());
+    std::vector<BusServiceRow> rows = makeRows(8);
+    TEST_ASSERT_EQUAL_UINT32(0, selectServicePage(rows, 6, 2).size());
 }
 
 // V2 API tests
@@ -313,9 +312,9 @@ void test_flatten_groups_by_service_and_label() {
     TEST_ASSERT_TRUE(result.valid);
     TEST_ASSERT_EQUAL(2, result.rows.size());
     TEST_ASSERT_EQUAL_STRING("124", result.rows[0].serviceNo.c_str());
-    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[0].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("HarbourFront Int", result.rows[0].label.c_str());
     TEST_ASSERT_EQUAL_STRING("124", result.rows[1].serviceNo.c_str());
-    TEST_ASSERT_EQUAL_STRING("HarbourFront Int", result.rows[1].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[1].label.c_str());
 }
 
 void test_flatten_sorts_arrivals_by_eta() {
@@ -516,9 +515,9 @@ void test_labels_shown_for_multiple_distinct_labels() {
     ParsedBusStop result = parseBusArrivalResponse(json, "52109");
     TEST_ASSERT_TRUE(result.valid);
     TEST_ASSERT_EQUAL(2, result.rows.size());
-    // Both rows should have labels visible
-    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[0].label.c_str());
-    TEST_ASSERT_EQUAL_STRING("HarbourFront Int", result.rows[1].label.c_str());
+    // Same visit, so labels sort alphabetically rather than by API slot.
+    TEST_ASSERT_EQUAL_STRING("HarbourFront Int", result.rows[0].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("St. Michael's Ter", result.rows[1].label.c_str());
 }
 
 void test_labels_shown_for_single_direction_non_loop() {
@@ -915,6 +914,151 @@ void test_cap_keeps_the_earliest_three() {
     TEST_ASSERT_TRUE(latest < fourth);
 }
 
+void test_row_order_ignores_which_slot_is_first() {
+    const char* leadA = R"JSON({
+      "busStops": [{"BusStopCode": "52109", "Services": [{
+        "ServiceNo": "124",
+        "NextBus": {"EstimatedArrival": "2026-09-28T16:40:00+08:00", "Label": "To St. Michael's Ter", "VisitNumber": "1"},
+        "NextBus2": {"EstimatedArrival": "2026-09-28T16:50:00+08:00", "Label": "To HarbourFront Int", "VisitNumber": "1"}
+      }]}]
+    })JSON";
+    const char* leadB = R"JSON({
+      "busStops": [{"BusStopCode": "52109", "Services": [{
+        "ServiceNo": "124",
+        "NextBus": {"EstimatedArrival": "2026-09-28T16:50:00+08:00", "Label": "To HarbourFront Int", "VisitNumber": "1"},
+        "NextBus2": {"EstimatedArrival": "2026-09-28T16:40:00+08:00", "Label": "To St. Michael's Ter", "VisitNumber": "1"}
+      }]}]
+    })JSON";
+    ParsedBusStop a = parseBusArrivalResponse(leadA, "52109");
+    ParsedBusStop b = parseBusArrivalResponse(leadB, "52109");
+    TEST_ASSERT_EQUAL(2, a.rows.size());
+    TEST_ASSERT_EQUAL_STRING(a.rows[0].label.c_str(), b.rows[0].label.c_str());
+    TEST_ASSERT_EQUAL_STRING(a.rows[1].label.c_str(), b.rows[1].label.c_str());
+    TEST_ASSERT_EQUAL_STRING("HarbourFront Int", a.rows[0].label.c_str());
+}
+
+void test_service_and_row_caps_hold() {
+    std::string json = "{\"busStops\":[{\"BusStopCode\":\"52109\",\"Services\":[";
+    for (int i = 0; i < 3000; ++i) {
+        if (i) {
+            json += ',';
+        }
+        json += "{\"ServiceNo\":\"" + std::to_string(i) +
+                "\",\"Loop\":{\"IsLoop\":false,\"LoopDesc\":null},"
+                "\"NextBus\":{\"EstimatedArrival\":\"2026-09-28T16:40:00+08:00\","
+                "\"Label\":\"To A\",\"VisitNumber\":\"1\",\"Load\":\"SEA\","
+                "\"Type\":\"SD\",\"Terminating\":false},"
+                "\"NextBus2\":{\"EstimatedArrival\":\"\",\"Label\":\"\","
+                "\"VisitNumber\":\"\",\"Load\":\"\",\"Type\":\"\",\"Terminating\":false},"
+                "\"NextBus3\":{\"EstimatedArrival\":\"\",\"Label\":\"\","
+                "\"VisitNumber\":\"\",\"Load\":\"\",\"Type\":\"\",\"Terminating\":false}}";
+    }
+    json += "]}]}";
+    ParsedBusStop capped = parseBusArrivalResponse(json, "52109");
+    TEST_ASSERT_TRUE(capped.valid);
+    TEST_ASSERT_EQUAL(kMaxServicesPerStop, capped.services.size());
+    TEST_ASSERT_TRUE(capped.rows.size() <= kMaxRowsPerStop);
+    TEST_ASSERT_TRUE(capped.rows.size() < 3000);
+
+    std::string wide = "{\"busStops\":[{\"BusStopCode\":\"52109\",\"Services\":[";
+    for (int i = 0; i < 40; ++i) {
+        if (i) {
+            wide += ',';
+        }
+        const std::string no = std::to_string(i);
+        wide += "{\"ServiceNo\":\"" + no +
+                "\",\"NextBus\":{\"EstimatedArrival\":\"2026-09-28T16:40:00+08:00\","
+                "\"Label\":\"To A\",\"VisitNumber\":\"1\"},"
+                "\"NextBus2\":{\"EstimatedArrival\":\"2026-09-28T16:50:00+08:00\","
+                "\"Label\":\"To B\",\"VisitNumber\":\"1\"},"
+                "\"NextBus3\":{\"EstimatedArrival\":\"2026-09-28T17:00:00+08:00\","
+                "\"Label\":\"To C\",\"VisitNumber\":\"1\"}}";
+    }
+    wide += "]}]}";
+    ParsedBusStop rows = parseBusArrivalResponse(wide, "52109");
+    TEST_ASSERT_EQUAL(40, rows.services.size());
+    TEST_ASSERT_EQUAL(kMaxRowsPerStop, rows.rows.size());
+}
+
+static std::string readFixture(const char* name) {
+    std::ifstream in(std::string("test/data/") + name);
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    return buffer.str();
+}
+
+static const BusServiceRow* findRow(const ParsedBusStop& stop, const char* service,
+                                    const char* visit) {
+    for (const BusServiceRow& row : stop.rows) {
+        if (row.serviceNo == service && row.visitNumber == visit) {
+            return &row;
+        }
+    }
+    return nullptr;
+}
+
+void test_live_52109_rows() {
+    ParsedBusStop stop = parseBusArrivalResponse(readFixture("stop_52109.json"), "52109");
+    TEST_ASSERT_TRUE(stop.valid);
+    TEST_ASSERT_TRUE(stop.updatedAtEpoch > 0);
+    int labels124 = 0;
+    bool saw125Visit2 = false;
+    bool saw125Loop = false;
+    for (const BusServiceRow& row : stop.rows) {
+        if (row.serviceNo == "124" && !row.label.empty()) {
+            ++labels124;
+        }
+        if (row.serviceNo == "125" && row.visitNumber == "2") {
+            saw125Visit2 = true;
+            saw125Loop = row.isLoop;
+            TEST_ASSERT_FALSE(row.label.empty());
+        }
+    }
+    TEST_ASSERT_EQUAL(2, labels124);
+    TEST_ASSERT_TRUE(saw125Visit2);
+    TEST_ASSERT_TRUE(saw125Loop);
+    TEST_ASSERT_TRUE(servicePageCount(stop.rows, 4) >= 3);
+}
+
+void test_live_52049_and_66271() {
+    ParsedBusStop a = parseBusArrivalResponse(readFixture("stop_52049.json"), "52049");
+    ParsedBusStop b = parseBusArrivalResponse(readFixture("stop_66271.json"), "66271");
+    TEST_ASSERT_TRUE(a.valid);
+    TEST_ASSERT_TRUE(b.valid);
+    int labels21 = 0;
+    int labels129 = 0;
+    int labels136 = 0;
+    for (const BusServiceRow& row : a.rows) {
+        if (row.serviceNo == "21") ++labels21;
+        if (row.serviceNo == "129") ++labels129;
+    }
+    for (const BusServiceRow& row : b.rows) {
+        if (row.serviceNo == "136") ++labels136;
+    }
+    TEST_ASSERT_EQUAL(2, labels21);
+    TEST_ASSERT_EQUAL(2, labels129);
+    TEST_ASSERT_EQUAL(2, labels136);
+}
+
+void test_live_figure_eight_291_293() {
+    ParsedBusStop stop = parseBusArrivalResponse(readFixture("figure_eight.json"), "75009");
+    TEST_ASSERT_TRUE(stop.valid);
+    const BusServiceRow* first = findRow(stop, "291", "1");
+    const BusServiceRow* second = findRow(stop, "291", "2");
+    TEST_ASSERT_TRUE(first != nullptr);
+    TEST_ASSERT_TRUE(second != nullptr);
+    TEST_ASSERT_TRUE(first->isLoop);
+    TEST_ASSERT_TRUE(shouldShowVisit2Marker(*second));
+    bool saw293 = false;
+    for (const BusService& svc : stop.services) {
+        if (svc.serviceNo == "293") {
+            saw293 = true;
+            TEST_ASSERT_TRUE(svc.isLoop);
+        }
+    }
+    TEST_ASSERT_TRUE(saw293);
+}
+
 void setup() {}
 void loop() {}
 
@@ -971,5 +1115,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_prune_keeps_a_bus_exactly_two_minutes_past);
     RUN_TEST(test_prune_does_nothing_when_the_clock_is_unset);
     RUN_TEST(test_cap_keeps_the_earliest_three);
+    RUN_TEST(test_row_order_ignores_which_slot_is_first);
+    RUN_TEST(test_service_and_row_caps_hold);
+    RUN_TEST(test_live_52109_rows);
+    RUN_TEST(test_live_52049_and_66271);
+    RUN_TEST(test_live_figure_eight_291_293);
     return UNITY_END();
 }

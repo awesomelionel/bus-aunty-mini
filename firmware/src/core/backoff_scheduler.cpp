@@ -28,11 +28,6 @@ void resetBackoff(BackoffState& state) {
     state.step = 0;
 }
 
-bool isDataStale(uint32_t dataTimestampMs, uint32_t nowMs) {
-    uint32_t age = nowMs - dataTimestampMs;
-    return age >= kStaleDataThresholdMs;
-}
-
 uint32_t dataAgeMs(uint32_t dataTimestampMs, uint32_t nowMs) {
     return nowMs - dataTimestampMs;
 }

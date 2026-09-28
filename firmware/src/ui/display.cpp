@@ -275,7 +275,10 @@ struct Palette {
 constexpr Palette kDayPalette = {
     /*chrome=*/0xC0C0C0, /*face=*/0xFFFFFF, /*ink=*/0x000000,
     /*hi=*/0xFFFFFF,     /*lo=*/0x808080,
-    /*capA=*/0x000080,   /*capB=*/0x1084D0, /*capInk=*/0xFFFFFF,
+    // capB used to be 0x1084D0. After RGB332 that blue is about 3.2:1
+    // under white, and the "as of" time sits on that end of the bar.
+    // 0x084888 quantises to about 8:1.
+    /*capA=*/0x000080,   /*capB=*/0x084888, /*capInk=*/0xFFFFFF,
     /*seats=*/0x008000,  /*stand=*/0xE07800, /*limit=*/0xD00000,
     /*dim=*/0x606060,
 };
@@ -374,15 +377,23 @@ constexpr int kBatteryLowPercent = 20;
 
 // Room for the Wi-Fi-off mark that sits just left of the battery.
 constexpr int kWifiOffSpan = 14;
+constexpr int kDotSpacing = 8;
+constexpr int kDotRadius = 2;
+
+// How much of the header's right side the page dots occupy, so the stop
+// name is trimmed before the first dot rather than drawn underneath it.
+int pageDotPad(size_t totalPages) {
+    if (totalPages <= 1) {
+        return 0;
+    }
+    return static_cast<int>(totalPages) * kDotSpacing + kDotRadius;
+}
 
 // The service rows and the header end a few pixels short of the bottom edge,
 // leaving room for an indicator that shows which page of a long service list
 // is on screen.
 void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY,
                   bool wifiOffline) {
-    constexpr int kDotRadius = 2;
-    constexpr int kDotSpacing = 8;
-
     int y = pageDotsY;
     const int batteryLeft = screenWidth() - kBatteryBodyWidth - kBatteryTipWidth -
                             kBatteryRightMargin;
@@ -410,14 +421,17 @@ void drawPageDots(size_t currentPage, size_t totalPages, int pageDotsY,
 constexpr int kHeaderRightPad =
     kBatteryBodyWidth + kBatteryTipWidth + kBatteryRightMargin + 4;
 
-void drawWifiOff(int batteryLeft) {
-    const int x = batteryLeft - kWifiOffSpan + 2;
-    const int y = kBatteryY;
-    canvas.drawRect(x, y, 10, kBatteryHeight, TFT_WHITE);
+template <typename Color>
+void drawWifiOffAt(int x, int y, Color color) {
+    canvas.drawRect(x, y, 10, kBatteryHeight, color);
     for (int i = 0; i < 8; ++i) {
         canvas.fillRect(x + 1 + i, y + 1 + (i * (kBatteryHeight - 3)) / 7, 1, 1,
-                        TFT_WHITE);
+                        color);
     }
+}
+
+void drawWifiOff(int batteryLeft) {
+    drawWifiOffAt(batteryLeft - kWifiOffSpan + 2, kBatteryY, TFT_WHITE);
 }
 
 void drawBattery(const hal::PowerStatus& power) {
@@ -493,7 +507,8 @@ void drawFramedArrivals(const std::string& stopLabel,
                         int64_t nowEpoch, size_t currentStopIndex,
                         size_t totalStops, size_t currentPage,
                         size_t totalPages, const hal::PowerStatus& power,
-                        uint32_t dataAgeMs, int64_t updatedAtEpoch) {
+                        uint32_t dataAgeMs, int64_t updatedAtEpoch,
+                        bool wifiOffline) {
     bool hasLabels = false;
     for (const BusServiceRow& row : rows) {
         if (rowShowsLabel(row)) {
@@ -524,11 +539,14 @@ void drawFramedArrivals(const std::string& stopLabel,
     // Reserve space for bold (+1px) and end before first button (x=276)
     constexpr int kTitleStartX = 4;
     constexpr int kTitleMaxWidth = 268;  // 276 - 4 - bold margin, keeps age
-    
+    // The Wi-Fi mark sits just left of the window buttons.
+    const int titleMax =
+        wifiOffline ? kTitleMaxWidth - kWifiOffSpan : kTitleMaxWidth;
+
     std::string title = buildHeader(stopLabel, currentStopIndex, totalStops,
-                                   dataAgeMs, updatedAtEpoch, kTitleMaxWidth,
+                                   dataAgeMs, updatedAtEpoch, titleMax,
                                    measureCanvasText);
-    
+
     drawBoldString(title.c_str(), kTitleStartX, 3, /*growLeft=*/false);
 
     // Window buttons, right to left, so they stay put as the title grows.
@@ -542,6 +560,10 @@ void drawFramedArrivals(const std::string& stopLabel,
         canvas.drawString(glyph, bx + 7, 9);
         canvas.setTextDatum(top_left);
         bx -= 14;
+    }
+    if (wifiOffline) {
+        canvas.setTextColor(p.capInk);
+        drawWifiOffAt(bx - 2, 3, p.capInk);
     }
 
     // Column header. Names what the three numbers are, which the plain screen
@@ -623,10 +645,12 @@ void drawFramedArrivals(const std::string& stopLabel,
                 // Plus the pixel the bold pass spreads leftward, or the gap
                 // closes up against a glyph only six pixels wide.
                 const int textWidth = canvas.textWidth(eta.c_str()) + 1;
+                // Align with the ETA line, not the two-line row. Centring
+                // on the row pitch drops the mark about 4px beside the digit.
+                const int lineH = canvas.fontHeight();
                 drawDoubleDeckMarker(
-                    layout.etaColRightX[col] - textWidth -
-                        kDeckMarkerGap,
-                    y + (rowHeight - kDeckMarkerHeight) / 2, tint);
+                    layout.etaColRightX[col] - textWidth - kDeckMarkerGap,
+                    y + (lineH - kDeckMarkerHeight) / 2, tint);
             }
         }
     }
@@ -869,7 +893,7 @@ void displayShowArrivals(const std::string& stopLabel,
     if (win95Theme) {
         drawFramedArrivals(stopLabel, rows, nowEpoch, currentStopIndex,
                            totalStops, currentPage, totalPages, power, dataAgeMs,
-                           updatedAtEpoch);
+                           updatedAtEpoch, wifiOffline);
         return;
     }
 
@@ -891,7 +915,8 @@ void displayShowArrivals(const std::string& stopLabel,
     canvas.setTextDatum(top_center);
     canvas.setFont(arrivalsFont());
     
-    const int rightPad = kHeaderRightPad + (wifiOffline ? kWifiOffSpan : 0);
+    const int rightPad = kHeaderRightPad + (wifiOffline ? kWifiOffSpan : 0) +
+                         pageDotPad(totalPages);
     int maxHeaderWidth = screenWidth() - rightPad - 4;
     std::string header = buildHeader(stopLabel, currentStopIndex, totalStops,
                                     dataAgeMs, updatedAtEpoch, maxHeaderWidth,

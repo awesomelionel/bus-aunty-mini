@@ -66,10 +66,19 @@ hal::PowerStatus charged() {
     return power;
 }
 
+bool rowsHaveLabels(const std::vector<BusServiceRow>& rows) {
+    for (const BusServiceRow& row : rows) {
+        if (rowShowsLabel(row)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool drawArrivals(const std::string& path, const char* boardName, bool win95,
                   bool night, const std::string& title,
                   std::vector<BusServiceRow> rows, int64_t updatedAt,
-                  uint32_t ageMs, size_t page, size_t pages) {
+                  uint32_t ageMs, size_t page, size_t pages, bool wifiOffline) {
     prepare(boardName, win95);
     int64_t now = updatedAt >= 0 ? updatedAt : 0;
     if (night) {
@@ -82,8 +91,22 @@ bool drawArrivals(const std::string& path, const char* boardName, bool win95,
     }
     pruneExpiredArrivals(rows, now);
     displayShowArrivals(title, rows, now, 0, 1, page, pages, charged(), ageMs,
-                        updatedAt, false);
+                        updatedAt, wifiOffline);
     return save(path);
+}
+
+// Page 0 of the full stop, with the real page count, so the header dots
+// sit in the reserved pad instead of on the stop name.
+bool drawStopPage(const std::string& path, const char* boardName,
+                  const ParsedBusStop& stop, const std::string& title) {
+    prepare(boardName, false);
+    const size_t per = servicesPerScreen(rowsHaveLabels(stop.rows));
+    const size_t pages = servicePageCount(stop.rows, per);
+    const std::vector<BusServiceRow> page = selectServicePage(stop.rows, per, 0);
+    std::cout << boardName << " pages " << pages << " rows " << page.size()
+              << "\n";
+    return drawArrivals(path, boardName, false, false, title, page,
+                        stop.updatedAtEpoch, 0, 0, pages, false);
 }
 
 }  // namespace
@@ -104,100 +127,57 @@ int main(int argc, char** argv) {
 
     const ParsedBusStop stop52109 =
         parseBusArrivalResponse(readFile(data + "/stop_52109.json"), "52109");
-    const ParsedBusStop stop52049 =
-        parseBusArrivalResponse(readFile(data + "/stop_52049.json"), "52049");
-    if (!stop52109.valid || !stop52049.valid) {
-        std::cerr << "live fixtures did not parse\n";
+    const ParsedBusStop stop52109Dd = parseBusArrivalResponse(
+        readFile(data + "/stop_52109_125dd.json"), "52109");
+    const ParsedBusStop stop66271 =
+        parseBusArrivalResponse(readFile(data + "/stop_66271.json"), "66271");
+    const ParsedBusStop term =
+        parseBusArrivalResponse(readFile(data + "/terminating.json"), "52109");
+    if (!stop52109.valid || !stop52109Dd.valid || !stop66271.valid ||
+        !term.valid) {
+        std::cerr << "fixtures did not parse\n";
         return 1;
     }
 
     bool ok = true;
-    const std::vector<BusServiceRow> loop125 =
-        serviceRows(stop52109.rows, "125");
-    const char* boards[] = {"sticks3", "feather", "tdisplay"};
-    for (const char* name : boards) {
-        ok &= drawArrivals(out + "/125_" + name + ".png", name, false, false,
-                           "52109", loop125, stop52109.updatedAtEpoch, 0, 0, 1);
-    }
-    ok &= drawArrivals(out + "/125_tdisplay_win95_day.png", "tdisplay", true, false,
-                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch, 0, 0,
-                       1);
-    ok &= drawArrivals(out + "/125_tdisplay_win95_night.png", "tdisplay", true, true,
-                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch, 0, 0,
-                       1);
+    ok &= drawStopPage(out + "/52109_3page_dots_sticks3.png", "sticks3",
+                       stop52109, "Opp St. Michael's");
+    ok &= drawStopPage(out + "/52109_3page_dots_tdisplay.png", "tdisplay",
+                       stop52109, "Opp St. Michael's");
+    ok &= drawStopPage(out + "/52109_3page_dots_feather.png", "feather",
+                       stop52109, "Opp St. Michael's");
 
-    ok &= drawArrivals(out + "/124_sticks3.png", "sticks3", false, false, "52109",
-                       serviceRows(stop52109.rows, "124"), stop52109.updatedAtEpoch,
-                       0, 0, 1);
-    ok &= drawArrivals(out + "/124_tdisplay.png", "tdisplay", false, false, "52109",
-                       serviceRows(stop52109.rows, "124"), stop52109.updatedAtEpoch,
-                       0, 0, 1);
+    const std::vector<BusServiceRow> loop125Dd =
+        serviceRows(stop52109Dd.rows, "125");
+    ok &= drawArrivals(out + "/125_win95_day_dd.png", "tdisplay", true, false,
+                       "Opp St. Michael's", loop125Dd, stop52109Dd.updatedAtEpoch,
+                       0, 0, 1, false);
+    ok &= drawArrivals(out + "/125_win95_night_dd.png", "tdisplay", true, true,
+                       "Opp St. Michael's", loop125Dd, stop52109Dd.updatedAtEpoch,
+                       0, 0, 1, false);
 
-    std::vector<BusServiceRow> both;
-    const std::vector<BusServiceRow> s21 = serviceRows(stop52049.rows, "21");
-    const std::vector<BusServiceRow> s129 = serviceRows(stop52049.rows, "129");
-    both.insert(both.end(), s21.begin(), s21.end());
-    both.insert(both.end(), s129.begin(), s129.end());
-    ok &= drawArrivals(out + "/21_129_sticks3.png", "sticks3", false, false, "52049",
-                       both, stop52049.updatedAtEpoch, 0, 0, 1);
-    ok &= drawArrivals(out + "/21_129_tdisplay.png", "tdisplay", false, false, "52049",
-                       both, stop52049.updatedAtEpoch, 0, 0, 1);
+    const std::vector<BusServiceRow> loop125 = serviceRows(stop52109.rows, "125");
+    ok &= drawArrivals(out + "/stale_updatedat_sticks3.png", "sticks3", false,
+                       false, "Opp St. Michael's", loop125, stop52109.updatedAtEpoch,
+                       180000, 0, 1, false);
+    ok &= drawArrivals(out + "/stale_win95_day.png", "tdisplay", true, false,
+                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch,
+                       180000, 0, 1, false);
 
-    const ParsedBusStop figure =
-        parseBusArrivalResponse(readFile(data + "/figure_eight.json"), "54009");
-    if (!figure.valid) {
-        std::cerr << "figure-eight fixture did not parse\n";
-        return 1;
-    }
-    ok &= drawArrivals(out + "/figure_eight_sticks3.png", "sticks3", false, false,
-                       "54009", figure.rows, figure.updatedAtEpoch, 0, 0, 2);
-    ok &= drawArrivals(out + "/figure_eight_tdisplay.png", "tdisplay", false, false,
-                       "54009", figure.rows, figure.updatedAtEpoch, 0, 0, 2);
+    ok &= drawArrivals(out + "/wifi_off_sticks3.png", "sticks3", false, false,
+                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch, 0,
+                       0, 1, true);
+    ok &= drawArrivals(out + "/wifi_off_win95_day.png", "tdisplay", true, false,
+                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch, 0,
+                       0, 1, true);
 
-    const ParsedBusStop trunc =
-        parseBusArrivalResponse(readFile(data + "/truncate_visit2.json"), "52109");
-    ok &= drawArrivals(out + "/truncate_2nd_sticks3.png", "sticks3", false, false,
-                       "52109", trunc.rows, trunc.updatedAtEpoch, 0, 0, 1);
-
-    // The Prince Edward label above fits (DejaVu9 is 161px, 203px with the
-    // marker reserved). This longer one is the case that actually cuts.
-    const ParsedBusStop cut =
-        parseBusArrivalResponse(readFile(data + "/truncate_long.json"), "52109");
-    ok &= drawArrivals(out + "/truncate_cut_sticks3.png", "sticks3", false, false,
-                       "52109", cut.rows, cut.updatedAtEpoch, 0, 0, 1);
-
-    const ParsedBusStop term =
-        parseBusArrivalResponse(readFile(data + "/terminating.json"), "52109");
+    ok &= drawArrivals(out + "/125_sticks3.png", "sticks3", false, false, "52109",
+                       loop125, stop52109.updatedAtEpoch, 0, 0, 1, false);
+    ok &= drawArrivals(out + "/136_66271_sticks3.png", "sticks3", false, false,
+                       "66271", serviceRows(stop66271.rows, "136"),
+                       stop66271.updatedAtEpoch, 0, 0, 1, false);
     ok &= drawArrivals(out + "/terminating_sticks3.png", "sticks3", false, false,
-                       "52109", term.rows, term.updatedAtEpoch, 0, 0, 1);
-    ok &= drawArrivals(out + "/terminating_feather.png", "feather", false, false,
-                       "52109", term.rows, term.updatedAtEpoch, 0, 0, 1);
-    ok &= drawArrivals(out + "/terminating_tdisplay.png", "tdisplay", false, false,
-                       "52109", term.rows, term.updatedAtEpoch, 0, 0, 1);
-    ok &= drawArrivals(out + "/terminating_win95_day.png", "tdisplay", true, false,
-                       "52109", term.rows, term.updatedAtEpoch, 0, 0, 1);
-    ok &= drawArrivals(out + "/terminating_win95_night.png", "tdisplay", true, true,
-                       "52109", term.rows, term.updatedAtEpoch, 0, 0, 1);
-
-    ok &= drawArrivals(out + "/stale_header_sticks3.png", "sticks3", false, false,
-                       "Befname Tampines", loop125, stop52109.updatedAtEpoch, 180000,
-                       1, 3);
-    ok &= drawArrivals(out + "/stale_header_win95_day.png", "tdisplay", true, false,
-                       "Befname Tampines", loop125, stop52109.updatedAtEpoch, 180000,
-                       1, 3);
-
-    prepare("sticks3", false);
-    displayShowStatus("No data\nLast: " + formatLocalHm(stop52109.updatedAtEpoch));
-    ok &= save(out + "/no_data_last_sticks3.png");
-
-    prepare("sticks3", false);
-    displayShowStatus("No More Buses\nUpdated " +
-                      formatLocalHm(stop52109.updatedAtEpoch));
-    ok &= save(out + "/no_more_buses_sticks3.png");
-
-    prepare("tdisplay", true);
-    displayShowStatus("No data\nLast: " + formatLocalHm(stop52109.updatedAtEpoch));
-    ok &= save(out + "/no_data_last_tdisplay.png");
+                       "52109", term.rows, term.updatedAtEpoch, 0, 0, 1, false);
 
     return ok ? 0 : 1;
 }

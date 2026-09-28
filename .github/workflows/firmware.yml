@@ -42,7 +42,11 @@ jobs:
         run: pio test -e native
 
       # No -e: this builds every env in default_envs, i.e. the three boards.
-      # host_render is omitted on purpose; it is a native PNG tool, not firmware.
       - name: Build all boards
         working-directory: firmware
         run: pio run
+
+      # Native PNG tool. Not in default_envs, so the board build above skips it.
+      - name: Build host renderer
+        working-directory: firmware
+        run: pio run -e host_render

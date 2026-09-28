@@ -28,9 +28,6 @@ void incrementBackoff(BackoffState& state);
 // Reset backoff on success
 void resetBackoff(BackoffState& state);
 
-// Returns true if data is older than 10 minutes (wrap-safe)
-bool isDataStale(uint32_t dataTimestampMs, uint32_t nowMs);
-
 // Returns age in ms (wrap-safe)
 uint32_t dataAgeMs(uint32_t dataTimestampMs, uint32_t nowMs);
 

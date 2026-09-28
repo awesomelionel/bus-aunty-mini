@@ -16,6 +16,15 @@ std::string truncateText(const std::string& text, int maxWidth,
     std::string cleaned;
     for (size_t i = 0; i < text.size(); ++i) {
         unsigned char c = static_cast<unsigned char>(text[i]);
+        // U+2019 RIGHT SINGLE QUOTATION MARK (UTF-8 E2 80 99) is the
+        // apostrophe the feed uses in "Michael's".
+        if (c == 0xE2 && i + 2 < text.size() &&
+            static_cast<unsigned char>(text[i + 1]) == 0x80 &&
+            static_cast<unsigned char>(text[i + 2]) == 0x99) {
+            cleaned += '\'';
+            i += 2;
+            continue;
+        }
         if (c >= 0x20 && c <= 0x7E) {
             cleaned += text[i];
         } else if ((c & 0xC0) != 0x80) {

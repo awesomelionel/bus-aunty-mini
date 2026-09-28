@@ -69,13 +69,16 @@ void test_data_stale_threshold() {
     uint32_t timestamp = 1000;
     
     // Fresh data
-    TEST_ASSERT_FALSE(isDataStale(timestamp, timestamp + 599999));
+    TEST_ASSERT_FALSE(dataAgeMs(timestamp, timestamp + 599999) >=
+                      kStaleDataThresholdMs);
     
     // At threshold
-    TEST_ASSERT_TRUE(isDataStale(timestamp, timestamp + 600000));
+    TEST_ASSERT_TRUE(dataAgeMs(timestamp, timestamp + 600000) >=
+                     kStaleDataThresholdMs);
     
     // Stale
-    TEST_ASSERT_TRUE(isDataStale(timestamp, timestamp + 700000));
+    TEST_ASSERT_TRUE(dataAgeMs(timestamp, timestamp + 700000) >=
+                     kStaleDataThresholdMs);
 }
 
 void test_data_stale_with_wrap() {
@@ -86,7 +89,7 @@ void test_data_stale_with_wrap() {
     // Age = nowWrapped - timestamp (wraps correctly)
     uint32_t age = nowWrapped - timestamp;
     TEST_ASSERT_TRUE(age >= kStaleDataThresholdMs);
-    TEST_ASSERT_TRUE(isDataStale(timestamp, nowWrapped));
+    TEST_ASSERT_TRUE(dataAgeMs(timestamp, nowWrapped) >= kStaleDataThresholdMs);
 }
 
 void test_should_refresh_display() {
@@ -119,19 +122,19 @@ void test_stale_data_classification() {
     
     // Fresh data should not be stale
     uint32_t fresh = now - 60000;  // 1 minute old
-    TEST_ASSERT_FALSE(isDataStale(fresh, now));
+    TEST_ASSERT_FALSE(dataAgeMs(fresh, now) >= kStaleDataThresholdMs);
     
     // Data at 9:59 should not be stale
     uint32_t almostStale = now - 599000;
-    TEST_ASSERT_FALSE(isDataStale(almostStale, now));
+    TEST_ASSERT_FALSE(dataAgeMs(almostStale, now) >= kStaleDataThresholdMs);
     
     // Data at exactly 10 minutes should be stale
     uint32_t exactlyTenMin = now - 600000;
-    TEST_ASSERT_TRUE(isDataStale(exactlyTenMin, now));
+    TEST_ASSERT_TRUE(dataAgeMs(exactlyTenMin, now) >= kStaleDataThresholdMs);
     
     // Old data should be stale
     uint32_t old = now - 720000;  // 12 minutes
-    TEST_ASSERT_TRUE(isDataStale(old, now));
+    TEST_ASSERT_TRUE(dataAgeMs(old, now) >= kStaleDataThresholdMs);
 }
 
 void setup() {}

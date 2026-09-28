@@ -138,7 +138,7 @@ pio run -e host_render
 
 The first argument is the output directory (default `/opt/cursor/artifacts`) and
 the second is the fixture directory (default `test/data`). `host_render` is not
-in `default_envs`, so `pio run` and CI do not build it.
+in `default_envs`, so a plain `pio run` skips it. CI builds it in its own step.
 
 ## Run the unit tests
 

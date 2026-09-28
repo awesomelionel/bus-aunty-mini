@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_system.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include <array>
@@ -58,6 +59,9 @@ bool offlineRendered = false;
 bool connectingRendered = false;
 bool inConfigScreen = false;
 bool timeSynced = false;
+bool cachedFrameValid = false;
+bool cachedFrameWasOffline = false;
+bool forceRedraw = false;
 WifiLinkState lastLinkState = WifiLinkState::Backoff;
 
 uint32_t lastInteractionMillis = 0;
@@ -124,6 +128,7 @@ void persistDirtySettings() {
             cache.hadArrivals = false;
         }
         currentPage = 0;
+        currentStopIndex = clampStopIndex(currentStopIndex, busStops.size());
         needsImmediateFetch = wifiLinkConnected();
     }
     if (alwaysOnDirty) {
@@ -171,22 +176,35 @@ void startSetupAp() {
     offlineRendered = false;
 }
 
+void seedClockFromUpdatedAt(int64_t updatedAtEpoch) {
+    if (!shouldSeedClock(time(nullptr), updatedAtEpoch)) {
+        return;
+    }
+    timeval tv = {};
+    tv.tv_sec = static_cast<time_t>(updatedAtEpoch);
+    settimeofday(&tv, nullptr);
+}
+
 void syncTime() {
-    displayShowStatus("Syncing time...");
     // The offset reaches localtime() only: configTime() sets the TZ
     // environment variable and never touches the system clock, so time()
     // still returns UTC epoch seconds and every arrival calculation is
     // unaffected. It is here so the framed screen's clock and its night
     // window read as Singapore rather than UTC.
     configTime(kLocalUtcOffsetSeconds, 0, "pool.ntp.org", "time.nist.gov");
+    if (!shouldBlockForNtp(time(nullptr))) {
+        timeSynced = true;
+        return;
+    }
 
+    displayShowStatus("Syncing time...");
     time_t now = time(nullptr);
     uint32_t startedAt = millis();
-    while (now < 1700000000 && millis() - startedAt < 15000) {
+    while (shouldBlockForNtp(now) && millis() - startedAt < 15000) {
         delay(250);
         now = time(nullptr);
     }
-    timeSynced = now >= 1700000000;
+    timeSynced = !shouldBlockForNtp(now);
 }
 
 bool cachedRowsHaveLabels(const std::vector<BusServiceRow>& rows) {
@@ -237,13 +255,16 @@ void renderCachedPage() {
         return;
     }
     
+    seedClockFromUpdatedAt(cache.updatedAtEpoch);
     const int64_t nowEpoch = time(nullptr);
     const bool clockSet = nowEpoch >= kClockSetEpoch;
     std::vector<BusServiceRow> live = cache.rows;
     if (clockSet) {
         pruneExpiredArrivals(live, nowEpoch);
     }
-    const uint32_t ageMs = dataAgeMs(cache.fetchedAtMillis, millis());
+    const uint32_t ageMs = arrivalDataAgeMs(
+        dataAgeMs(cache.fetchedAtMillis, millis()), nowEpoch,
+        cache.updatedAtEpoch);
     const ArrivalScreen screen = selectArrivalScreen(
         clockSet, cache.notFound, cache.hadArrivals, !live.empty(), ageMs);
     if (screen != ArrivalScreen::Arrivals) {
@@ -293,6 +314,7 @@ void pollAndRender() {
 
     // Status first. Error bodies are plain text, so they are not parsed.
     if (classifyFetch(fetch.httpStatus, false) == FetchClass::NotFound) {
+        applyFetchOutcome(backoffState, FetchClass::NotFound);
         cache.stopCode = stop.code;
         cache.label = label;
         cache.notFound = true;
@@ -301,7 +323,7 @@ void pollAndRender() {
         return;
     }
     if (fetch.httpStatus != 200) {
-        incrementBackoff(backoffState);
+        applyFetchOutcome(backoffState, FetchClass::Backoff);
         if (haveCache) {
             renderCachedPage();
         } else {
@@ -311,20 +333,20 @@ void pollAndRender() {
         return;
     }
 
-    ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
+    ParsedBusStop parsed = fetch.parsed;
     if (classifyFetch(fetch.httpStatus, parsed.valid) != FetchClass::Ok) {
-        // Parse error, or a 200 whose busStops list does not contain this stop.
-        incrementBackoff(backoffState);
+        // Parse error, a body over the size cap, or a 200 whose busStops
+        // list does not contain this stop.
+        applyFetchOutcome(backoffState, FetchClass::Backoff);
         if (haveCache) {
             renderCachedPage();
-        } else if (fetch.parseError) {
-            displayShowStatus("Bad data");
         } else {
             displayShowStatus("Bad response for " + label);
         }
         return;
     }
 
+    seedClockFromUpdatedAt(parsed.updatedAtEpoch);
     const int64_t nowEpoch = time(nullptr);
     cache.hadArrivals = rowsHaveArrivals(parsed.rows);
     if (nowEpoch >= kClockSetEpoch) {
@@ -337,7 +359,7 @@ void pollAndRender() {
     cache.fetchedAtMillis = millis();
     cache.notFound = false;
     cache.valid = true;
-    resetBackoff(backoffState);
+    applyFetchOutcome(backoffState, FetchClass::Ok);
 
     if (!cache.hadArrivals) {
         renderCachedPage();
@@ -483,16 +505,19 @@ void onLinkState(WifiLinkState next) {
         if (!timeSynced) {
             syncTime();
         }
-        // Don't clear caches - keep last-good data, let 10-minute rule decide
+        // Don't clear caches - keep last-good data, let 10-minute rule decide.
+        // The clock stays as it was: a drop must not forget a synced time.
         noStopsRendered = false;
         offlineRendered = false;
         connectingRendered = false;
+        cachedFrameValid = false;
         needsImmediateFetch = true;
+        forceRedraw = true;
         noteInteraction();
     } else if (lastLinkState == WifiLinkState::Connected) {
         configServerStopMdns();
-        timeSynced = false;
         offlineRendered = false;
+        cachedFrameValid = false;
     }
     if (next != WifiLinkState::ApFallback) {
         configServerStopCaptiveDns();
@@ -631,26 +656,26 @@ void loop() {
         currentStopIndex < kMaxBusStops &&
         stopCaches[currentStopIndex].valid;
 
-    if (wifiLinkConnecting()) {
-        if (cachedStop && keepArrivalsOnWifiLoss(true)) {
-            renderCachedPage();
-            connectingRendered = false;
-            offlineRendered = false;
-        } else if (!connectingRendered) {
-            displayShowStatus("Connecting WiFi...");
+    if (wifiLinkConnecting() || !wifiLinkConnected()) {
+        if (cachedStop) {
+            const bool offline = !wifiLinkConnected();
+            const uint32_t nowMs = millis();
+            const bool stateChanged =
+                !cachedFrameValid || cachedFrameWasOffline != offline;
+            if (shouldRedrawCached(stateChanged, lastDisplayRefreshMs, nowMs)) {
+                renderCachedPage();
+                lastDisplayRefreshMs = nowMs;
+                cachedFrameValid = true;
+                cachedFrameWasOffline = offline;
+            }
             connectingRendered = true;
-            offlineRendered = false;
-        }
-        delay(50);
-        return;
-    }
-
-    if (!wifiLinkConnected()) {
-        if (cachedStop &&
-            keepArrivalsOnWifiLoss(stopCaches[currentStopIndex].valid)) {
-            renderCachedPage();
-            offlineRendered = false;
-            connectingRendered = false;
+            offlineRendered = true;
+        } else if (wifiLinkConnecting()) {
+            if (!connectingRendered) {
+                displayShowStatus("Connecting WiFi...");
+                connectingRendered = true;
+                offlineRendered = false;
+            }
         } else if (!offlineRendered && !inConfigScreen) {
             displayShowWifiOffline();
             offlineRendered = true;
@@ -658,6 +683,13 @@ void loop() {
         }
         delay(50);
         return;
+    }
+
+    if (forceRedraw) {
+        renderCachedPage();
+        lastDisplayRefreshMs = millis();
+        forceRedraw = false;
+        cachedFrameValid = false;
     }
 
     if (busStops.empty()) {

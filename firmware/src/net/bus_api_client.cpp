@@ -6,18 +6,58 @@
 
 #include "net/certs.h"
 
+namespace {
+
+// Stops a Stream once `left` bytes have been read, so a missing
+// Content-Length cannot pull an unbounded body into the JSON parser.
+class BoundedStream : public Stream {
+public:
+    BoundedStream(Stream& inner, size_t cap) : inner_(inner), left_(cap) {}
+
+    int available() override {
+        if (left_ == 0) {
+            return 0;
+        }
+        const int n = inner_.available();
+        if (n <= 0) {
+            return 0;
+        }
+        if (static_cast<size_t>(n) > left_) {
+            return static_cast<int>(left_);
+        }
+        return n;
+    }
+
+    int read() override {
+        if (left_ == 0) {
+            return -1;
+        }
+        const int c = inner_.read();
+        if (c >= 0) {
+            --left_;
+        }
+        return c;
+    }
+
+    int peek() override {
+        if (left_ == 0) {
+            return -1;
+        }
+        return inner_.peek();
+    }
+
+    size_t write(uint8_t) override { return 0; }
+
+private:
+    Stream& inner_;
+    size_t left_;
+};
+
+}  // namespace
+
 FetchResult fetchBusArrival(const std::string& busStopCode) {
     FetchResult result;
 
-#ifdef ESP32
-    // Log heap before fetch
-    uint32_t heapBefore = ESP.getFreeHeap();
-    uint32_t maxAllocBefore = ESP.getMaxAllocHeap();
-    Serial.printf("[heap] before fetch: free=%u max_alloc=%u\n", heapBefore, maxAllocBefore);
-#endif
-
-    bool heapLogged = false;
-    
     WiFiClientSecure client;
     client.setCACert(kGtsRootR4Pem);
 
@@ -28,37 +68,24 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
     std::string url =
         "https://api.busaunty.com/api/v2/BusArrival?BusStopCode=" + busStopCode;
     if (!http.begin(client, url.c_str())) {
-#ifdef ESP32
-        uint32_t heapAfter = ESP.getFreeHeap();
-        uint32_t maxAllocAfter = ESP.getMaxAllocHeap();
-        Serial.printf("[heap] after fetch: free=%u max_alloc=%u (delta: %d)\n", 
-                      heapAfter, maxAllocAfter, 
-                      static_cast<int32_t>(heapAfter) - static_cast<int32_t>(heapBefore));
-        heapLogged = true;
-#endif
         return result;
     }
 
     result.httpStatus = http.GET();
-    if (result.httpStatus == HTTP_CODE_OK) {
-        // Read response body directly as string
-        // arrival_parser.cpp will parse it with its own filter
-        result.body = http.getString().c_str();
-        result.ok = !result.body.empty();
+    if (result.httpStatus != HTTP_CODE_OK) {
+        http.end();
+        return result;
     }
 
+    const int length = http.getSize();
+    if (length > kMaxArrivalBodyBytes) {
+        http.end();
+        return result;
+    }
+
+    BoundedStream capped(http.getStream(),
+                         static_cast<size_t>(kMaxArrivalBodyBytes));
+    result.parsed = parseBusArrivalStream(capped, busStopCode);
     http.end();
-
-#ifdef ESP32
-    if (!heapLogged) {
-        // Log heap after fetch
-        uint32_t heapAfter = ESP.getFreeHeap();
-        uint32_t maxAllocAfter = ESP.getMaxAllocHeap();
-        Serial.printf("[heap] after fetch: free=%u max_alloc=%u (delta: %d)\n", 
-                      heapAfter, maxAllocAfter, 
-                      static_cast<int32_t>(heapAfter) - static_cast<int32_t>(heapBefore));
-    }
-#endif
-
     return result;
 }
