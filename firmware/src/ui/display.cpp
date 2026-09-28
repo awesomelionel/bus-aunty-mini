@@ -45,6 +45,12 @@ const lgfx::GFXfont* labelFont() {
                                             : &fonts::DejaVu9;
 }
 
+// One width callback so truncateText and buildHeader are not copied per
+// call site. Each lambda would be its own template instantiation.
+int measureCanvasText(const char* text) {
+    return canvas.textWidth(text);
+}
+
 // Wrapper for truncateText that handles font setup and visit marker reservation.
 // When BUS_AUNTY_SHOW_VISIT_MARKER is enabled and reserveMarkerWidth is true,
 // reserves space for " 2nd" marker.
@@ -68,9 +74,7 @@ std::string truncateLabel(const std::string& text, int maxWidth,
 #endif
     
     // Use core truncation with canvas width callback
-    return truncateText(text, maxWidth, [](const char* s) {
-        return canvas.textWidth(s);
-    });
+    return truncateText(text, maxWidth, measureCanvasText);
 }
 
 // One label line for both themes. "Ends here" replaces the destination when
@@ -523,7 +527,7 @@ void drawFramedArrivals(const std::string& stopLabel,
     
     std::string title = buildHeader(stopLabel, currentStopIndex, totalStops,
                                    dataAgeMs, updatedAtEpoch, kTitleMaxWidth,
-                                   [](const char* s) { return canvas.textWidth(s); });
+                                   measureCanvasText);
     
     drawBoldString(title.c_str(), kTitleStartX, 3, /*growLeft=*/false);
 
@@ -891,7 +895,7 @@ void displayShowArrivals(const std::string& stopLabel,
     int maxHeaderWidth = screenWidth() - rightPad - 4;
     std::string header = buildHeader(stopLabel, currentStopIndex, totalStops,
                                     dataAgeMs, updatedAtEpoch, maxHeaderWidth,
-                                    [](const char* s) { return canvas.textWidth(s); });
+                                    measureCanvasText);
 
     const int headerCenterX = (screenWidth() - rightPad) / 2;
     canvas.drawString(header.c_str(), headerCenterX, 0);
