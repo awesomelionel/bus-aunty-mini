@@ -443,6 +443,19 @@ int hostTextWidth(const lgfx::GFXfont* font, const char* text) {
     return gfxTextWidth(font, text);
 }
 
+int hostSpriteWidth() { return gRoot != nullptr ? gRoot->width() : 0; }
+
+int hostSpriteHeight() { return gRoot != nullptr ? gRoot->height() : 0; }
+
+uint32_t hostPixel(int x, int y) {
+    if (gRoot == nullptr || gRoot->pixels() == nullptr || x < 0 || y < 0 ||
+        x >= gRoot->width() || y >= gRoot->height()) {
+        return 0;
+    }
+    return gRoot->pixels()[static_cast<size_t>(y) * static_cast<size_t>(gRoot->width()) +
+                           static_cast<size_t>(x)];
+}
+
 bool hostSavePng(const char* path) {
     if (gRoot == nullptr || gRoot->pixels() == nullptr) {
         return false;

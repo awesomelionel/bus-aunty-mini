@@ -195,3 +195,8 @@ void hostSetBoard(const char* name);
 bool hostSavePng(const char* path);
 int hostFontHeight(const lgfx::GFXfont* font);
 int hostTextWidth(const lgfx::GFXfont* font, const char* text);
+
+// The sprite ui/display.cpp draws into. Zero before displaySetup().
+int hostSpriteWidth();
+int hostSpriteHeight();
+uint32_t hostPixel(int x, int y);

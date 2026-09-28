@@ -758,77 +758,7 @@ void drawFramedArrivals(const std::string& stopLabel,
     canvas.setTextDatum(top_left);
 }
 
-#if defined(BOARD_HOST)
-int countFitting(const lgfx::GFXfont* font, int maxWidth, char fill) {
-    if (maxWidth <= 0) {
-        return 0;
-    }
-    canvas.setFont(font);
-    std::string probe;
-    int fit = 0;
-    while (fit < 80) {
-        probe.push_back(fill);
-        if (canvas.textWidth(probe.c_str()) > maxWidth) {
-            break;
-        }
-        ++fit;
-    }
-    return fit;
-}
-
-// Prints the destination budget for the compact row. Host renderer only.
-void describeCompactFit() {
-    const bool framed = win95Theme;
-    const int serviceX =
-        framed ? arrivalsLayout.serviceColX + 2 : arrivalsLayout.serviceColX;
-    canvas.setFont(labelFont());
-    const int markerW = canvas.textWidth(" 2nd");
-    std::printf(
-        "FIT name=%s framed=%d per=%zu rowH=%d eta0=%d eta1=%d markerW=%d "
-        "etaInk=%d ascentSvc=%d ascentLbl=%d\n",
-        board().name, framed ? 1 : 0, arrivalsLayout.servicesPerScreen,
-        arrivalsLayout.rowHeight, arrivalsLayout.etaColRightX[0],
-        arrivalsLayout.etaColRightX[1], markerW, widestEtaInk(framed),
-        fontAscent(arrivalsFont()), fontAscent(labelFont()));
-
-    const char* services[] = {"961M", "125e", "29A", "68B", "186", "125", "12"};
-    const char* labels[] = {
-        "St. Michael's Ter",      "HarbourFront Int", "Sims",
-        "Shenton Way Ter",        "Bt Merah Int",     "Toa Payoh Int",
-        "Pasir Ris Int",          "Tampines Nth Int", "Changi Business Pk Ave 3",
-        "S'goon Nth Ave 5",       "Tampines Nth Dr 2", "Lor 6 Toa Payoh",
-        "Ang Mo Kio Int",         "Serangoon Int",    "Punggol Int",
-        "Ends here",              "Tampines St 33",   "Changi Nth Way",
-    };
-    for (const char* service : services) {
-        const InlineLabelPlace place = placeInlineLabel(
-            service, serviceX, 0, arrivalsLayout.etaColRightX[0], framed);
-        const int markBudget = place.maxWidth - markerW;
-        std::printf(
-            "  svc=%s maxW=%d n=%d W=%d nWith2nd=%d\n", service, place.maxWidth,
-            countFitting(labelFont(), place.maxWidth, 'n'),
-            countFitting(labelFont(), place.maxWidth, 'W'),
-            countFitting(labelFont(), markBudget, 'n'));
-        for (const char* label : labels) {
-            const std::string shown =
-                truncateLabel(label, place.maxWidth, labelFont(), false);
-            const std::string shown2 =
-                truncateLabel(label, place.maxWidth, labelFont(), true);
-            std::printf("    \"%s\" -> \"%s\"", label, shown.c_str());
-            if (shown2 != shown) {
-                std::printf(" | 2nd \"%s\"", shown2.c_str());
-            }
-            std::printf("\n");
-        }
-    }
-}
-#endif
-
 }  // namespace
-
-#if defined(BOARD_HOST)
-void displayDescribeCompactFit() { describeCompactFit(); }
-#endif
 
 void displaySetup() {
     hal::displayDeviceBegin();

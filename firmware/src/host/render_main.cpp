@@ -117,31 +117,6 @@ bool drawEach(const std::string& out, const std::string& scenario,
     return ok;
 }
 
-void logRow(const BusServiceRow& row) {
-    std::cout << "    " << row.serviceNo << " v" << row.visitNumber
-              << " loop=" << (row.isLoop ? 1 : 0)
-              << " ends=" << (rowAllTerminating(row) ? 1 : 0)
-              << " mark2=" << (shouldShowVisit2Marker(row) ? 1 : 0)
-              << " label=\"" << row.label << "\"";
-    for (size_t i = 0; i < kArrivalsPerService; ++i) {
-        const BusArrival& arrival = row.arrivals[i];
-        if (arrival.etaEpoch < 0) {
-            continue;
-        }
-        const char* type = "U";
-        if (arrival.type == BusType::DoubleDeck) {
-            type = "DD";
-        } else if (arrival.type == BusType::SingleDeck) {
-            type = "SD";
-        } else if (arrival.type == BusType::Bendy) {
-            type = "BD";
-        }
-        std::cout << " a" << i << "=" << type
-                  << (arrival.terminating ? "T" : "");
-    }
-    std::cout << "\n";
-}
-
 // Every page, not just the first. Page count is measured after the theme is
 // set, because Win95 chrome fits fewer rows than the plain list.
 bool drawStopPages(const std::string& out, const std::string& scenario,
@@ -152,15 +127,10 @@ bool drawStopPages(const std::string& out, const std::string& scenario,
         const size_t per = servicesPerScreen();
         const size_t pages = servicePageCount(stop.rows, per);
         std::cout << scenario << " " << view.tag << " per " << per << " pages "
-                  << pages << " totalRows " << stop.rows.size() << "\n";
+                  << pages << "\n";
         for (size_t pageIndex = 0; pageIndex < pages; ++pageIndex) {
             const std::vector<BusServiceRow> page =
                 selectServicePage(stop.rows, per, pageIndex);
-            std::cout << "  page " << pageIndex << " shown " << page.size()
-                      << "\n";
-            for (const BusServiceRow& row : page) {
-                logRow(row);
-            }
             ok &= drawArrivals(out + "/" + scenario + "_p" +
                                    std::to_string(pageIndex) + "_" + view.tag +
                                    ".png",
@@ -172,8 +142,6 @@ bool drawStopPages(const std::string& out, const std::string& scenario,
 }
 
 }  // namespace
-
-void displayDescribeCompactFit();
 
 int main(int argc, char** argv) {
     const std::string out = argc > 1 ? argv[1] : "/opt/cursor/artifacts";
@@ -187,15 +155,6 @@ int main(int argc, char** argv) {
     if (marker <= 0 || h18 <= 0 || h24 <= 0) {
         std::cerr << "font metrics did not load\n";
         return 1;
-    }
-
-    for (const View& view : kViews) {
-        if (view.night) {
-            continue;  // night is a palette shift; the row geometry matches day
-        }
-        prepare(view.board, view.win95);
-        std::cout << "FITTAG " << view.tag << "\n";
-        displayDescribeCompactFit();
     }
 
     const ParsedBusStop stop52109 =
