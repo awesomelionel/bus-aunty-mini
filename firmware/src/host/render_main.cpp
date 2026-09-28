@@ -75,6 +75,25 @@ bool rowsHaveLabels(const std::vector<BusServiceRow>& rows) {
     return false;
 }
 
+// What the firmware can actually show. Win95 is T-Display only
+// (supportsFramedTheme). Night is the framed palette only: the plain path
+// never calls isNightAt. Passing Win95 on StickS3 or Feather stays plain,
+// so those combinations are not rendered.
+struct View {
+    const char* board;
+    bool win95;
+    bool night;
+    const char* tag;
+};
+
+constexpr View kViews[] = {
+    {"sticks3", false, false, "sticks3_plain"},
+    {"feather", false, false, "feather_plain"},
+    {"tdisplay", false, false, "tdisplay_plain"},
+    {"tdisplay", true, false, "tdisplay_win95_day"},
+    {"tdisplay", true, true, "tdisplay_win95_night"},
+};
+
 bool drawArrivals(const std::string& path, const char* boardName, bool win95,
                   bool night, const std::string& title,
                   std::vector<BusServiceRow> rows, int64_t updatedAt,
@@ -95,18 +114,36 @@ bool drawArrivals(const std::string& path, const char* boardName, bool win95,
     return save(path);
 }
 
-// Page 0 of the full stop, with the real page count, so the header dots
-// sit in the reserved pad instead of on the stop name.
-bool drawStopPage(const std::string& path, const char* boardName,
-                  const ParsedBusStop& stop, const std::string& title) {
-    prepare(boardName, false);
-    const size_t per = servicesPerScreen(rowsHaveLabels(stop.rows));
-    const size_t pages = servicePageCount(stop.rows, per);
-    const std::vector<BusServiceRow> page = selectServicePage(stop.rows, per, 0);
-    std::cout << boardName << " pages " << pages << " rows " << page.size()
-              << "\n";
-    return drawArrivals(path, boardName, false, false, title, page,
-                        stop.updatedAtEpoch, 0, 0, pages, false);
+bool drawEach(const std::string& out, const std::string& scenario,
+              const std::string& title, std::vector<BusServiceRow> rows,
+              int64_t updatedAt, uint32_t ageMs, bool wifiOffline) {
+    bool ok = true;
+    for (const View& view : kViews) {
+        ok &= drawArrivals(out + "/" + scenario + "_" + view.tag + ".png",
+                           view.board, view.win95, view.night, title, rows,
+                           updatedAt, ageMs, 0, 1, wifiOffline);
+    }
+    return ok;
+}
+
+// Page 0 of the full stop. Page count is measured after the theme is set,
+// because Win95 chrome fits fewer rows than the plain list.
+bool drawStopPages(const std::string& out, const std::string& scenario,
+                   const ParsedBusStop& stop, const std::string& title) {
+    bool ok = true;
+    for (const View& view : kViews) {
+        prepare(view.board, view.win95);
+        const size_t per = servicesPerScreen(rowsHaveLabels(stop.rows));
+        const size_t pages = servicePageCount(stop.rows, per);
+        const std::vector<BusServiceRow> page =
+            selectServicePage(stop.rows, per, 0);
+        std::cout << scenario << " " << view.tag << " pages " << pages
+                  << " rows " << page.size() << "\n";
+        ok &= drawArrivals(out + "/" + scenario + "_" + view.tag + ".png",
+                           view.board, view.win95, view.night, title, page,
+                           stop.updatedAtEpoch, 0, 0, pages, false);
+    }
+    return ok;
 }
 
 }  // namespace
@@ -140,44 +177,26 @@ int main(int argc, char** argv) {
     }
 
     bool ok = true;
-    ok &= drawStopPage(out + "/52109_3page_dots_sticks3.png", "sticks3",
-                       stop52109, "Opp St. Michael's");
-    ok &= drawStopPage(out + "/52109_3page_dots_tdisplay.png", "tdisplay",
-                       stop52109, "Opp St. Michael's");
-    ok &= drawStopPage(out + "/52109_3page_dots_feather.png", "feather",
-                       stop52109, "Opp St. Michael's");
+    ok &= drawStopPages(out, "dots", stop52109, "Opp St. Michael's");
 
-    const std::vector<BusServiceRow> loop125Dd =
+    // The 17:18 capture is the one where 125 visit 2 is a double-decker.
+    // The plain theme does not draw that mark; Win95 does, on the ETA line.
+    const std::vector<BusServiceRow> loop125 =
         serviceRows(stop52109Dd.rows, "125");
-    ok &= drawArrivals(out + "/125_win95_day_dd.png", "tdisplay", true, false,
-                       "Opp St. Michael's", loop125Dd, stop52109Dd.updatedAtEpoch,
-                       0, 0, 1, false);
-    ok &= drawArrivals(out + "/125_win95_night_dd.png", "tdisplay", true, true,
-                       "Opp St. Michael's", loop125Dd, stop52109Dd.updatedAtEpoch,
-                       0, 0, 1, false);
+    ok &= drawEach(out, "s125", "Opp St. Michael's", loop125,
+                   stop52109Dd.updatedAtEpoch, 0, false);
 
-    const std::vector<BusServiceRow> loop125 = serviceRows(stop52109.rows, "125");
-    ok &= drawArrivals(out + "/stale_updatedat_sticks3.png", "sticks3", false,
-                       false, "Opp St. Michael's", loop125, stop52109.updatedAtEpoch,
-                       180000, 0, 1, false);
-    ok &= drawArrivals(out + "/stale_win95_day.png", "tdisplay", true, false,
-                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch,
-                       180000, 0, 1, false);
+    ok &= drawEach(out, "wifi", "Opp St. Michael's", loop125,
+                   stop52109Dd.updatedAtEpoch, 0, true);
 
-    ok &= drawArrivals(out + "/wifi_off_sticks3.png", "sticks3", false, false,
-                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch, 0,
-                       0, 1, true);
-    ok &= drawArrivals(out + "/wifi_off_win95_day.png", "tdisplay", true, false,
-                       "Opp St. Michael's", loop125, stop52109.updatedAtEpoch, 0,
-                       0, 1, true);
+    ok &= drawEach(out, "stale", "Opp St. Michael's", loop125,
+                   stop52109Dd.updatedAtEpoch, 180000, false);
 
-    ok &= drawArrivals(out + "/125_sticks3.png", "sticks3", false, false, "52109",
-                       loop125, stop52109.updatedAtEpoch, 0, 0, 1, false);
-    ok &= drawArrivals(out + "/136_66271_sticks3.png", "sticks3", false, false,
-                       "66271", serviceRows(stop66271.rows, "136"),
-                       stop66271.updatedAtEpoch, 0, 0, 1, false);
-    ok &= drawArrivals(out + "/terminating_sticks3.png", "sticks3", false, false,
-                       "52109", term.rows, term.updatedAtEpoch, 0, 0, 1, false);
+    ok &= drawEach(out, "term", "52109", term.rows, term.updatedAtEpoch, 0,
+                   false);
+
+    ok &= drawEach(out, "s136", "66271", serviceRows(stop66271.rows, "136"),
+                   stop66271.updatedAtEpoch, 0, false);
 
     return ok ? 0 : 1;
 }
