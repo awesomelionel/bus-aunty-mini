@@ -28,9 +28,18 @@ int64_t parseIso8601ToEpoch(const std::string& iso8601) {
     if (fields != 6) {
         return -1;
     }
-    if (month < 1 || month > 12 || day < 1 || day > 31 ||
-        hour < 0 || hour > 23 || minute < 0 || minute > 59 ||
-        second < 0 || second > 59) {
+    if (month < 1 || month > 12 || hour < 0 || hour > 23 || minute < 0 ||
+        minute > 59 || second < 0 || second > 59) {
+        return -1;
+    }
+    const int daysInMonth[] = {0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    int dim = daysInMonth[month];
+    const bool leap =
+        (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+    if (month == 2 && leap) {
+        dim = 29;
+    }
+    if (day < 1 || day > dim) {
         return -1;
     }
 
@@ -39,8 +48,20 @@ int64_t parseIso8601ToEpoch(const std::string& iso8601) {
     int64_t epoch = days * 86400 + hour * 3600 + minute * 60 + second;
 
     const char* tail = iso8601.c_str() + consumed;
-    if (tail[0] == '\0' || (tail[0] == 'Z' && tail[1] == '\0')) {
+    // UpdatedAt carries fractional seconds ("...03.630381+08:00"). The epoch
+    // is whole seconds, so the fraction is skipped rather than rounded.
+    if (tail[0] == '.') {
+        ++tail;
+        while (tail[0] >= '0' && tail[0] <= '9') {
+            ++tail;
+        }
+    }
+    // A trailing Z is UTC. A timestamp with no offset is not assumed to be UTC.
+    if (tail[0] == 'Z' && tail[1] == '\0') {
         return epoch;
+    }
+    if (tail[0] == '\0') {
+        return -1;
     }
     if (tail[0] == '+' || tail[0] == '-') {
         int offsetHour, offsetMinute;

@@ -20,19 +20,25 @@ void test_exactly_sixty_minutes_is_not_capped() {
     TEST_ASSERT_EQUAL_STRING("60", formatEtaMinutes(4600, 1000).c_str());
 }
 
-void test_arriving_window_covers_two_minutes_ahead() {
-    TEST_ASSERT_EQUAL_STRING("Arr", formatEtaMinutes(1120, 1000).c_str());
+void test_arriving_window_is_one_minute() {
+    TEST_ASSERT_EQUAL_STRING("Arr", formatEtaMinutes(1060, 1000).c_str());
     TEST_ASSERT_EQUAL_STRING("Arr", formatEtaMinutes(1010, 1000).c_str());
+    TEST_ASSERT_EQUAL_STRING("1", formatEtaMinutes(1061, 1000).c_str());
+    TEST_ASSERT_EQUAL_STRING("2", formatEtaMinutes(1120, 1000).c_str());
 }
 
 void test_just_outside_the_window_shows_minutes_again() {
     TEST_ASSERT_EQUAL_STRING("2", formatEtaMinutes(1121, 1000).c_str());
 }
 
-void test_any_past_arrival_keeps_showing_arriving() {
+void test_recent_past_arrival_shows_arriving() {
     TEST_ASSERT_EQUAL_STRING("Arr", formatEtaMinutes(995, 1000).c_str());
     TEST_ASSERT_EQUAL_STRING("Arr", formatEtaMinutes(880, 1000).c_str());
-    TEST_ASSERT_EQUAL_STRING("Arr", formatEtaMinutes(1, 1000).c_str());
+}
+
+void test_arrival_older_than_two_minutes_is_not_arr() {
+    TEST_ASSERT_EQUAL_STRING("--", formatEtaMinutes(879, 1000).c_str());
+    TEST_ASSERT_EQUAL_STRING("--", formatEtaMinutes(1, 1000).c_str());
 }
 
 void test_over_an_hour_caps_at_sixty_plus() {
@@ -48,9 +54,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_rounds_down_to_whole_minutes);
     RUN_TEST(test_crossing_a_minute_boundary);
     RUN_TEST(test_exactly_sixty_minutes_is_not_capped);
-    RUN_TEST(test_arriving_window_covers_two_minutes_ahead);
+    RUN_TEST(test_arriving_window_is_one_minute);
     RUN_TEST(test_just_outside_the_window_shows_minutes_again);
-    RUN_TEST(test_any_past_arrival_keeps_showing_arriving);
+    RUN_TEST(test_recent_past_arrival_shows_arriving);
+    RUN_TEST(test_arrival_older_than_two_minutes_is_not_arr);
     RUN_TEST(test_over_an_hour_caps_at_sixty_plus);
     return UNITY_END();
 }

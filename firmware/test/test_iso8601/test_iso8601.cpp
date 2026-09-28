@@ -41,6 +41,32 @@ void test_rejects_out_of_range_hour() {
     TEST_ASSERT_EQUAL_INT64(-1, parseIso8601ToEpoch("2024-03-20T99:34:56Z"));
 }
 
+void test_fractional_seconds_match_the_whole_second() {
+    int64_t whole = parseIso8601ToEpoch("2026-09-28T16:33:03+08:00");
+    int64_t fraction =
+        parseIso8601ToEpoch("2026-09-28T16:33:03.630381+08:00");
+    TEST_ASSERT_TRUE(whole > 0);
+    TEST_ASSERT_EQUAL_INT64(whole, fraction);
+}
+
+void test_estimated_arrival_without_fraction_still_parses() {
+    int64_t epoch = parseIso8601ToEpoch("2026-09-28T16:37:46+08:00");
+    TEST_ASSERT_TRUE(epoch > 0);
+}
+
+void test_rejects_timestamp_without_offset() {
+    TEST_ASSERT_EQUAL_INT64(-1, parseIso8601ToEpoch("2026-09-28T16:37:46"));
+}
+
+void test_rejects_february_31() {
+    TEST_ASSERT_EQUAL_INT64(-1, parseIso8601ToEpoch("2024-02-31T12:00:00Z"));
+}
+
+void test_accepts_a_real_leap_day() {
+    TEST_ASSERT_TRUE(parseIso8601ToEpoch("2024-02-29T00:00:00Z") > 0);
+    TEST_ASSERT_EQUAL_INT64(-1, parseIso8601ToEpoch("2023-02-29T00:00:00Z"));
+}
+
 void setup() {}
 void loop() {}
 
@@ -54,5 +80,10 @@ int main(int argc, char** argv) {
     RUN_TEST(test_rejects_malformed_offset);
     RUN_TEST(test_rejects_out_of_range_month);
     RUN_TEST(test_rejects_out_of_range_hour);
+    RUN_TEST(test_fractional_seconds_match_the_whole_second);
+    RUN_TEST(test_estimated_arrival_without_fraction_still_parses);
+    RUN_TEST(test_rejects_timestamp_without_offset);
+    RUN_TEST(test_rejects_february_31);
+    RUN_TEST(test_accepts_a_real_leap_day);
     return UNITY_END();
 }

@@ -1,11 +1,13 @@
 #include "core/eta_format.h"
 
+#include "core/arrival_parser.h"
+
 namespace {
 
-// The upstream ETA is an estimate, and a bus counted as "arrived" may not
-// have reached this stop yet, so anything within this much of the estimate --
-// or already past it -- counts as arriving.
-constexpr int64_t kArrivingWindowSeconds = 120;
+// A bus due within a minute, or up to two minutes past its estimate, is
+// "Arr". Anything older than that is dropped by pruneExpiredArrivals before
+// it is drawn; if one is formatted anyway it is a placeholder, not "Arr".
+constexpr int64_t kArrivingWindowSeconds = 60;
 
 }  // namespace
 
@@ -16,6 +18,9 @@ std::string formatEtaMinutes(int64_t targetEpoch, int64_t nowEpoch) {
 
     int64_t diffSeconds = targetEpoch - nowEpoch;
 
+    if (diffSeconds < -kEtaDropPastSeconds) {
+        return "--";
+    }
     if (diffSeconds <= kArrivingWindowSeconds) {
         return kEtaArrivingLabel;
     }

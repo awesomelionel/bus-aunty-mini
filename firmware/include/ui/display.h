@@ -18,8 +18,9 @@ void displaySetTheme(bool win95);
 bool displayThemeIsWin95();
 // How many service rows fit under the header at the arrivals font size.
 // Depends on the panel's height and the font's measured row height, so it is
-// only meaningful after displaySetup().
-size_t servicesPerScreen();
+// only meaningful after displaySetup(). `hasLabels` selects between single-line
+// and two-line row pitch.
+size_t servicesPerScreen(bool hasLabels);
 // Drops the backlight to the dim level, or takes it back to full. Whatever is
 // on screen stays on screen and stays live.
 void displaySetDimmed(bool dimmed);
@@ -34,9 +35,15 @@ void displayShowConfig(const std::string& url, const std::string& ip,
 void displayShowWifiOffline();
 void displayShowNoStops();
 // `stopLabel` is the stop's name, or its code when it was left unnamed.
-// `services` is already the slice for `currentPage`.
+// `rows` is already the slice for `currentPage`.
+// `dataAgeMs` is millis() since the last good payload. At 150s or more the
+// header adds "as of HH:MM" from `updatedAtEpoch` (negative when unknown).
+// `wifiOffline` keeps the cached rows up and marks the header instead of
+// replacing the screen with "No WiFi".
 void displayShowArrivals(const std::string& stopLabel,
-                          const std::vector<BusService>& services,
+                          const std::vector<BusServiceRow>& rows,
                           int64_t nowEpoch, size_t currentStopIndex,
                           size_t totalStops, size_t currentPage,
-                          size_t totalPages, const hal::PowerStatus& power);
+                          size_t totalPages, const hal::PowerStatus& power,
+                          uint32_t dataAgeMs = 0, int64_t updatedAtEpoch = -1,
+                          bool wifiOffline = false);

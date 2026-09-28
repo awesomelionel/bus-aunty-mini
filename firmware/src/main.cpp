@@ -2,12 +2,16 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_system.h>
+#include <sys/time.h>
 #include <time.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
 #include "core/arrival_parser.h"
+#include "core/arrival_screen.h"
+#include "core/backoff_scheduler.h"
 #include "core/bus_stop_config.h"
 #include "core/night_window.h"
 #include "core/sleep_policy.h"
@@ -25,7 +29,6 @@
 
 namespace {
 
-constexpr uint32_t kPollIntervalMs = 30000;
 constexpr uint32_t kPortalHoldMs = 3000;
 constexpr uint32_t kSleepHoldMs = 1500;
 constexpr char kSetupApSsid[] = "BusAuntySetup";
@@ -48,21 +51,36 @@ bool stopsDirty = false;
 bool alwaysOnDirty = false;
 bool win95ThemeDirty = false;
 size_t currentStopIndex = 0;
-uint32_t lastPollMillis = 0;
+BackoffState backoffState;
 bool needsImmediateFetch = true;
+uint32_t lastDisplayRefreshMs = 0;
 bool noStopsRendered = false;
 bool offlineRendered = false;
 bool connectingRendered = false;
 bool inConfigScreen = false;
 bool timeSynced = false;
+bool cachedFrameValid = false;
+bool cachedFrameWasOffline = false;
+bool forceRedraw = false;
 WifiLinkState lastLinkState = WifiLinkState::Backoff;
 
 uint32_t lastInteractionMillis = 0;
 uint32_t ignoreSleepClickUntilMs = 0;
 PowerMode powerMode = PowerMode::Awake;
 
-std::vector<BusService> cachedServices;
-std::string cachedLabel;
+// Per-stop cache: stores rows and fetch time for each configured stop
+struct StopCache {
+    std::string stopCode;
+    std::vector<BusServiceRow> rows;
+    std::string label;
+    uint32_t fetchedAtMillis = 0;
+    int64_t updatedAtEpoch = -1;
+    bool hadArrivals = false;
+    bool notFound = false;
+    bool valid = false;
+};
+std::array<StopCache, kMaxBusStops> stopCaches;
+
 size_t currentPage = 0;
 
 void noteInteraction() { lastInteractionMillis = millis(); }
@@ -96,9 +114,22 @@ void logWifiDiagnostics() {
 }
 
 void persistDirtySettings() {
+    const bool saved = stopsDirty || alwaysOnDirty || win95ThemeDirty ||
+                       networksDirty;
     if (stopsDirty) {
         saveBusStops(busStops);
         stopsDirty = false;
+        // Clear all caches when stops change
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+            cache.stopCode.clear();
+            cache.notFound = false;
+            cache.hadArrivals = false;
+        }
+        currentPage = 0;
+        currentStopIndex = clampStopIndex(currentStopIndex, busStops.size());
+        needsImmediateFetch = wifiLinkConnected();
     }
     if (alwaysOnDirty) {
         saveAlwaysOn(alwaysOn);
@@ -113,12 +144,22 @@ void persistDirtySettings() {
         // the old five-row screen can point past the end of a four-row one.
         displaySetTheme(win95Theme);
         currentPage = 0;
-        cachedServices.clear();
+        // Invalidate all stop caches
+        for (StopCache& cache : stopCaches) {
+            cache.valid = false;
+            cache.rows.clear();
+            cache.notFound = false;
+            cache.hadArrivals = false;
+        }
         needsImmediateFetch = wifiLinkConnected();
     }
     if (networksDirty) {
         saveWifiNetworks(wifiNetworks);
         networksDirty = false;
+    }
+    // A config save starts the retry schedule over, the same as a good fetch.
+    if (saved) {
+        resetBackoff(backoffState);
     }
 }
 
@@ -135,73 +176,225 @@ void startSetupAp() {
     offlineRendered = false;
 }
 
+void seedClockFromUpdatedAt(int64_t updatedAtEpoch) {
+    if (!shouldSeedClock(time(nullptr), updatedAtEpoch)) {
+        return;
+    }
+    timeval tv = {};
+    tv.tv_sec = static_cast<time_t>(updatedAtEpoch);
+    settimeofday(&tv, nullptr);
+}
+
 void syncTime() {
-    displayShowStatus("Syncing time...");
     // The offset reaches localtime() only: configTime() sets the TZ
     // environment variable and never touches the system clock, so time()
     // still returns UTC epoch seconds and every arrival calculation is
     // unaffected. It is here so the framed screen's clock and its night
     // window read as Singapore rather than UTC.
     configTime(kLocalUtcOffsetSeconds, 0, "pool.ntp.org", "time.nist.gov");
+    if (!shouldBlockForNtp(time(nullptr))) {
+        timeSynced = true;
+        return;
+    }
 
+    displayShowStatus("Syncing time...");
     time_t now = time(nullptr);
     uint32_t startedAt = millis();
-    while (now < 1700000000 && millis() - startedAt < 15000) {
+    while (shouldBlockForNtp(now) && millis() - startedAt < 15000) {
         delay(250);
         now = time(nullptr);
     }
-    timeSynced = now >= 1700000000;
+    timeSynced = !shouldBlockForNtp(now);
+}
+
+bool cachedRowsHaveLabels(const std::vector<BusServiceRow>& rows) {
+    for (const BusServiceRow& row : rows) {
+        if (rowShowsLabel(row)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void showArrivalScreen(ArrivalScreen screen, const StopCache& cache) {
+    const std::string hm = formatLocalHm(cache.updatedAtEpoch);
+    switch (screen) {
+        case ArrivalScreen::Loading:
+            displayShowStatus("Loading...");
+            break;
+        case ArrivalScreen::NotFound:
+            displayShowStatus("No data\nCheck stop code");
+            break;
+        case ArrivalScreen::NoRecentData:
+            displayShowStatus("No data\nLast: " + hm);
+            break;
+        case ArrivalScreen::NoServices:
+            displayShowStatus(cache.label + ": no services");
+            break;
+        case ArrivalScreen::NoMoreBuses:
+            displayShowStatus("No More Buses\nUpdated " + hm);
+            break;
+        case ArrivalScreen::Arrivals:
+            break;
+    }
 }
 
 void renderCachedPage() {
+    if (currentStopIndex >= kMaxBusStops || currentStopIndex >= busStops.size()) {
+        return;
+    }
+    
+    StopCache& cache = stopCaches[currentStopIndex];
+    if (!cache.valid) {
+        return;
+    }
+    
+    // Verify cache stopCode matches current stop
+    if (cache.stopCode != busStops[currentStopIndex].code) {
+        cache.valid = false;
+        return;
+    }
+    
+    seedClockFromUpdatedAt(cache.updatedAtEpoch);
+    const int64_t nowEpoch = time(nullptr);
+    const bool clockSet = nowEpoch >= kClockSetEpoch;
+    std::vector<BusServiceRow> live = cache.rows;
+    if (clockSet) {
+        pruneExpiredArrivals(live, nowEpoch);
+    }
+    const uint32_t ageMs = arrivalDataAgeMs(
+        dataAgeMs(cache.fetchedAtMillis, millis()), nowEpoch,
+        cache.updatedAtEpoch);
+    const ArrivalScreen screen = selectArrivalScreen(
+        clockSet, cache.notFound, cache.hadArrivals, !live.empty(), ageMs);
+    if (screen != ArrivalScreen::Arrivals) {
+        showArrivalScreen(screen, cache);
+        return;
+    }
+
+    bool hasLabels = cachedRowsHaveLabels(live);
     size_t totalPages =
-        servicePageCount(cachedServices.size(), servicesPerScreen());
-    std::vector<BusService> page =
-        selectServicePage(cachedServices, servicesPerScreen(), currentPage);
-    displayShowArrivals(cachedLabel, page, time(nullptr), currentStopIndex,
+        servicePageCount(live, servicesPerScreen(hasLabels));
+    if (currentPage >= totalPages) {
+        currentPage = 0;
+    }
+    std::vector<BusServiceRow> page =
+        selectServicePage(live, servicesPerScreen(hasLabels), currentPage);
+
+    displayShowArrivals(cache.label, page, nowEpoch, currentStopIndex,
                          busStops.size(), currentPage, totalPages,
-                         hal::powerStatus());
+                         hal::powerStatus(), ageMs, cache.updatedAtEpoch,
+                         !wifiLinkConnected());
 }
 
 void pollAndRender() {
+    if (currentStopIndex >= busStops.size() || currentStopIndex >= kMaxBusStops) {
+        return;
+    }
+    
     const BusStopConfig& stop = busStops[currentStopIndex];
     const std::string& label = busStopLabel(stop);
-    displayShowStatus("Loading " + label + "...");
+    StopCache& cache = stopCaches[currentStopIndex];
+    
+    // Errors keep the last good payload. The 10-minute screen is applied
+    // when that payload is drawn, not by discarding it here.
+    bool haveCache = cache.valid;
+    
+    // Only show "Loading..." on first fetch or stop change
+    if (!cache.valid) {
+        displayShowStatus("Loading " + label + "...");
+    }
 
-    cachedServices.clear();
+    // The retry interval is measured from the start of this attempt.
+    backoffState.lastAttemptMs = millis();
+    
     wifiLinkSetBusy(true);
     FetchResult fetch = fetchBusArrival(stop.code);
     wifiLinkSetBusy(false);
-    if (!fetch.ok) {
-        displayShowStatus(fetch.httpStatus == 404
-                               ? "No data for " + label
-                               : std::string("Fetch failed (") +
-                                     std::to_string(fetch.httpStatus) + ")");
+
+    // Status first. Error bodies are plain text, so they are not parsed.
+    if (classifyFetch(fetch.httpStatus, false) == FetchClass::NotFound) {
+        applyFetchOutcome(backoffState, FetchClass::NotFound);
+        cache.stopCode = stop.code;
+        cache.label = label;
+        cache.notFound = true;
+        cache.valid = true;
+        renderCachedPage();
+        return;
+    }
+    if (fetch.httpStatus != 200) {
+        applyFetchOutcome(backoffState, FetchClass::Backoff);
+        if (haveCache) {
+            renderCachedPage();
+        } else {
+            displayShowStatus(std::string("Fetch failed (") +
+                              std::to_string(fetch.httpStatus) + ")");
+        }
         return;
     }
 
-    ParsedBusStop parsed = parseBusArrivalResponse(fetch.body, stop.code);
-    if (!parsed.valid) {
-        displayShowStatus("Bad response for " + label);
-        return;
-    }
-    if (parsed.services.empty()) {
-        displayShowStatus(label + ": no services");
+    ParsedBusStop parsed = fetch.parsed;
+    if (classifyFetch(fetch.httpStatus, parsed.valid) != FetchClass::Ok) {
+        // Parse error, a body over the size cap, or a 200 whose busStops
+        // list does not contain this stop.
+        applyFetchOutcome(backoffState, FetchClass::Backoff);
+        if (haveCache) {
+            renderCachedPage();
+        } else {
+            displayShowStatus("Bad response for " + label);
+        }
         return;
     }
 
-    cachedServices = parsed.services;
-    cachedLabel = label;
+    seedClockFromUpdatedAt(parsed.updatedAtEpoch);
+    const int64_t nowEpoch = time(nullptr);
+    cache.hadArrivals = rowsHaveArrivals(parsed.rows);
+    if (nowEpoch >= kClockSetEpoch) {
+        pruneExpiredArrivals(parsed.rows, nowEpoch);
+    }
+    cache.stopCode = stop.code;
+    cache.rows = parsed.rows;
+    cache.label = label;
+    cache.updatedAtEpoch = parsed.updatedAtEpoch;
+    cache.fetchedAtMillis = millis();
+    cache.notFound = false;
+    cache.valid = true;
+    applyFetchOutcome(backoffState, FetchClass::Ok);
+
+    if (!cache.hadArrivals) {
+        renderCachedPage();
+        return;
+    }
+    
+    bool hasLabels = cachedRowsHaveLabels(cache.rows);
     if (currentPage >=
-        servicePageCount(cachedServices.size(), servicesPerScreen())) {
+        servicePageCount(cache.rows, servicesPerScreen(hasLabels))) {
         currentPage = 0;
     }
     renderCachedPage();
 }
 
 void stepForward() {
+    if (currentStopIndex >= kMaxBusStops) {
+        return;
+    }
+    
+    StopCache& cache = stopCaches[currentStopIndex];
+    if (!cache.valid) {
+        // No cache yet, move to next stop
+        currentPage = 0;
+        currentStopIndex = (currentStopIndex + 1) % busStops.size();
+        needsImmediateFetch = true;
+        return;
+    }
+    
+    std::vector<BusServiceRow> live = cache.rows;
+    if (time(nullptr) >= kClockSetEpoch) {
+        pruneExpiredArrivals(live, time(nullptr));
+    }
+    bool hasLabels = cachedRowsHaveLabels(live);
     size_t totalPages =
-        servicePageCount(cachedServices.size(), servicesPerScreen());
+        servicePageCount(live, servicesPerScreen(hasLabels));
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();
@@ -241,14 +434,19 @@ void enterSleep() {
 
     wifiLinkOnWake();
 
-    cachedServices.clear();
+    // Invalidate all stop caches after sleep
+    for (StopCache& cache : stopCaches) {
+        cache.valid = false;
+        cache.rows.clear();
+        cache.notFound = false;
+        cache.hadArrivals = false;
+    }
     currentPage = 0;
     noStopsRendered = false;
     offlineRendered = false;
     connectingRendered = false;
     inConfigScreen = false;
     needsImmediateFetch = true;
-    lastPollMillis = millis();
     powerMode = PowerMode::Awake;
     noteInteraction();
     ignoreSleepClickUntilMs = millis() + kIgnoreSleepClickAfterWakeMs;
@@ -307,19 +505,19 @@ void onLinkState(WifiLinkState next) {
         if (!timeSynced) {
             syncTime();
         }
-        cachedServices.clear();
-        currentPage = 0;
+        // Don't clear caches - keep last-good data, let 10-minute rule decide.
+        // The clock stays as it was: a drop must not forget a synced time.
         noStopsRendered = false;
         offlineRendered = false;
         connectingRendered = false;
+        cachedFrameValid = false;
         needsImmediateFetch = true;
-        lastPollMillis = millis();
+        forceRedraw = true;
         noteInteraction();
     } else if (lastLinkState == WifiLinkState::Connected) {
         configServerStopMdns();
-        timeSynced = false;
-        cachedServices.clear();
         offlineRendered = false;
+        cachedFrameValid = false;
     }
     if (next != WifiLinkState::ApFallback) {
         configServerStopCaptiveDns();
@@ -411,6 +609,10 @@ void loop() {
             inConfigScreen = false;
             offlineRendered = false;
             noStopsRendered = false;
+            // The config screen is still on the panel. Drop the "frame is
+            // current" flag so the next pass redraws instead of waiting out
+            // the 15s refresh while offline.
+            cachedFrameValid = false;
             needsImmediateFetch = wifiLinkConnected();
             noteInteraction();
             return;
@@ -453,24 +655,56 @@ void loop() {
         return;
     }
 
-    if (wifiLinkConnecting()) {
-        if (!connectingRendered) {
-            displayShowStatus("Connecting WiFi...");
-            connectingRendered = true;
-            offlineRendered = false;
-        }
-        delay(50);
-        return;
-    }
+    const bool cachedStop =
+        !busStops.empty() && currentStopIndex < busStops.size() &&
+        currentStopIndex < kMaxBusStops &&
+        stopCaches[currentStopIndex].valid;
 
-    if (!wifiLinkConnected()) {
-        if (!offlineRendered && !inConfigScreen) {
+    if (wifiLinkConnecting() || !wifiLinkConnected()) {
+        if (cachedStop) {
+            // Page while the radio is down. A page change redraws here, and
+            // a stop change only marks the frame stale so the gate below
+            // draws the cached stop.
+            if (hal::wasClicked(hal::Button::Primary)) {
+                stepForward();
+                cachedFrameValid = false;
+            }
+            if (hal::wasClicked(hal::Button::Previous)) {
+                stepBack();
+                cachedFrameValid = false;
+            }
+            const bool offline = !wifiLinkConnected();
+            const uint32_t nowMs = millis();
+            const bool stateChanged =
+                !cachedFrameValid || cachedFrameWasOffline != offline;
+            if (shouldRedrawCached(stateChanged, lastDisplayRefreshMs, nowMs)) {
+                renderCachedPage();
+                lastDisplayRefreshMs = nowMs;
+                cachedFrameValid = true;
+                cachedFrameWasOffline = offline;
+            }
+            connectingRendered = true;
+            offlineRendered = true;
+        } else if (wifiLinkConnecting()) {
+            if (!connectingRendered) {
+                displayShowStatus("Connecting WiFi...");
+                connectingRendered = true;
+                offlineRendered = false;
+            }
+        } else if (!offlineRendered && !inConfigScreen) {
             displayShowWifiOffline();
             offlineRendered = true;
             connectingRendered = false;
         }
         delay(50);
         return;
+    }
+
+    if (forceRedraw) {
+        renderCachedPage();
+        lastDisplayRefreshMs = millis();
+        forceRedraw = false;
+        cachedFrameValid = false;
     }
 
     if (busStops.empty()) {
@@ -490,9 +724,17 @@ void loop() {
     }
 
     uint32_t now = millis();
-    if (needsImmediateFetch || now - lastPollMillis >= kPollIntervalMs) {
+    
+    // Refresh display periodically to update ETAs and stale age
+    if (shouldRefreshDisplay(lastDisplayRefreshMs, now)) {
+        renderCachedPage();
+        lastDisplayRefreshMs = now;
+    }
+    
+    // Attempt fetch based on backoff schedule
+    if (needsImmediateFetch || shouldAttemptFetch(backoffState, now)) {
         pollAndRender();
-        lastPollMillis = now;
+        lastDisplayRefreshMs = now;
         needsImmediateFetch = false;
     }
 }
