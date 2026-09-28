@@ -28,6 +28,10 @@ enum class BusType {
 // same cap after arrivals from several slots are merged.
 constexpr size_t kArrivalsPerService = 3;
 
+// The compact row draws the next two of those, soonest first. The third stays
+// on the row for the next refresh; it is not given a column.
+constexpr size_t kShownArrivals = 2;
+
 // A hostile or huge payload must not become thousands of rows. A busy
 // interchange fits well inside both limits.
 constexpr size_t kMaxServicesPerStop = 48;

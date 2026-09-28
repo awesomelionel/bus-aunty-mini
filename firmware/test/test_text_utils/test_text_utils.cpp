@@ -67,6 +67,18 @@ void test_cut_after_st_no_double_dot() {
     TEST_ASSERT_EQUAL_STRING("St.", result.c_str());
 }
 
+// The inline destination turns word breaks off so a short first word does
+// not leave the rest of the gutter empty. 70px is seven 10px characters.
+void test_hard_cut_fills_past_a_short_first_word() {
+    std::string result = truncateText("St. Michael's Ter", 70, mockWidth, false);
+    TEST_ASSERT_EQUAL_STRING("St. Mi.", result.c_str());
+}
+
+void test_hard_cut_does_not_leave_a_space_before_the_dot() {
+    std::string result = truncateText("Serangoon Int", 110, mockWidth, false);
+    TEST_ASSERT_EQUAL_STRING("Serangoon.", result.c_str());
+}
+
 void test_exact_fit_without_truncation() {
     // "Hello" = 50px, fits exactly in 50px
     std::string result = truncateText("Hello", 50, mockWidth);
@@ -125,6 +137,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_multiple_word_boundaries);
     RUN_TEST(test_appends_dot_when_truncated_at_exact_width);
     RUN_TEST(test_cut_after_st_no_double_dot);
+    RUN_TEST(test_hard_cut_fills_past_a_short_first_word);
+    RUN_TEST(test_hard_cut_does_not_leave_a_space_before_the_dot);
     RUN_TEST(test_exact_fit_without_truncation);
     RUN_TEST(test_fit_plus_one_pixel);
     RUN_TEST(test_27_char_label_with_marker_width_reserved);

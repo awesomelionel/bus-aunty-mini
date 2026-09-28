@@ -22,10 +22,9 @@ namespace {
 // hal::gfx() touches the hardware, so binding at static-init is safe.
 hal::Canvas canvas(&hal::gfx());
 
-// Two layouts: single-line for stops with no labels, two-line for stops with labels.
-// Computed once in displaySetup(), selected at render time based on current data.
-ArrivalsLayout arrivalsLayoutSingleLine;
-ArrivalsLayout arrivalsLayoutTwoLine;
+// One layout, computed in displaySetup(). The destination shares the service
+// number's line, so a label does not select a taller row.
+ArrivalsLayout arrivalsLayout;
 
 int screenWidth() { return board().screenWidth; }
 int screenHeight() { return board().screenHeight; }
@@ -43,6 +42,85 @@ const lgfx::GFXfont* arrivalsFont() {
 const lgfx::GFXfont* labelFont() {
     return board().arrivalsFontHeight >= 24 ? &fonts::DejaVu12
                                             : &fonts::DejaVu9;
+}
+
+// Pixels from a top_left drawString to the baseline: the deepest glyph top
+// in the font. DejaVu18 is 13, DejaVu9 is 7, DejaVu24 is 18, DejaVu12 is 9.
+int fontAscent(const lgfx::GFXfont* font) {
+    int ascent = 0;
+    if (font == nullptr || font->glyph == nullptr) {
+        return 0;
+    }
+    const int count =
+        static_cast<int>(font->last) - static_cast<int>(font->first) + 1;
+    for (int i = 0; i < count; ++i) {
+        const int above = -static_cast<int>(font->glyph[i].yOffset);
+        if (above > ascent) {
+            ascent = above;
+        }
+    }
+    return ascent;
+}
+
+// Gap between the service number and the destination, and between the
+// destination and the first ETA. The ETA side is a fixed gutter, not the
+// width of whatever minute is showing, so the destination does not reflow
+// as a bus counts down.
+constexpr int kInlineLabelGap = 6;
+constexpr int kLabelEtaGap = 4;
+
+// Two stacked bars beside a double-decker ETA. Width is reserved in the
+// destination gutter on the framed theme even when this bus is not one,
+// so the label does not jump when the vehicle type changes.
+constexpr int kDeckMarkerWidth = 6;
+constexpr int kDeckMarkerHeight = 9;
+constexpr int kDeckMarkerGap = 3;
+
+// How far left of the column's right edge the first ETA can paint: the
+// widest countdown, the bold / "Arr" overdraw, and on the framed theme the
+// double-decker mark. Reserved on every row so a DD bus does not collide
+// and an SD bus does not suddenly gain letters.
+int widestEtaInk(bool framed) {
+    canvas.setFont(arrivalsFont());
+    int width = canvas.textWidth(kEtaArrivingLabel);
+    const int overHour = canvas.textWidth("60+");
+    if (overHour > width) {
+        width = overHour;
+    }
+    const int blank = canvas.textWidth("--");
+    if (blank > width) {
+        width = blank;
+    }
+    // Plain "Arr" is redrawn one pixel to the left. Framed text is already
+    // bold by one pixel, and "Arr" is drawn once more.
+    width += framed ? 2 : 1;
+    if (framed) {
+        width += kDeckMarkerGap + kDeckMarkerWidth;
+    }
+    return width;
+}
+
+struct InlineLabelPlace {
+    int x;
+    int y;
+    int maxWidth;
+};
+
+// Destination on the service number's baseline, in the label font, cut
+// where the first ETA column starts.
+InlineLabelPlace placeInlineLabel(const std::string& serviceNo, int serviceX,
+                                  int serviceY, int etaRight, bool framed) {
+    canvas.setFont(arrivalsFont());
+    int serviceW = canvas.textWidth(serviceNo.c_str());
+    if (framed) {
+        serviceW += 1;  // the bold pass grows to the right
+    }
+    InlineLabelPlace place;
+    place.x = serviceX + serviceW + kInlineLabelGap;
+    place.y = serviceY + fontAscent(arrivalsFont()) - fontAscent(labelFont());
+    place.maxWidth =
+        etaRight - widestEtaInk(framed) - kLabelEtaGap - place.x;
+    return place;
 }
 
 // One width callback so truncateText and buildHeader are not copied per
@@ -73,8 +151,9 @@ std::string truncateLabel(const std::string& text, int maxWidth,
     }
 #endif
     
-    // Use core truncation with canvas width callback
-    return truncateText(text, maxWidth, measureCanvasText);
+    // Character cut, not a word break. The gutter is short enough that
+    // "St. Michael's Ter" would otherwise stop at "St.".
+    return truncateText(text, maxWidth, measureCanvasText, /*breakOnWords=*/false);
 }
 
 // One label line for both themes. "Ends here" replaces the destination when
@@ -321,10 +400,6 @@ void drawBoldString(const char* text, int x, int y, bool growLeft) {
 // two decks. Drawn only for a double decker: a marker that tries to mean
 // single, double and bendy at six pixels across means none of them, and the
 // feed's single deck is the unremarkable case anyway.
-constexpr int kDeckMarkerWidth = 6;
-constexpr int kDeckMarkerHeight = 9;
-constexpr int kDeckMarkerGap = 3;
-
 void drawDoubleDeckMarker(int right, int top, uint32_t color) {
     const int x = right - kDeckMarkerWidth;
     canvas.fillRect(x, top, kDeckMarkerWidth, 4, color);
@@ -509,16 +584,8 @@ void drawFramedArrivals(const std::string& stopLabel,
                         size_t totalPages, const hal::PowerStatus& power,
                         uint32_t dataAgeMs, int64_t updatedAtEpoch,
                         bool wifiOffline) {
-    bool hasLabels = false;
-    for (const BusServiceRow& row : rows) {
-        if (rowShowsLabel(row)) {
-            hasLabels = true;
-            break;
-        }
-    }
-    
-    const ArrivalsLayout& layout = hasLabels ? arrivalsLayoutTwoLine : arrivalsLayoutSingleLine;
-    
+    const ArrivalsLayout& layout = arrivalsLayout;
+
     const Palette& p = paletteFor(nowEpoch);
     const int w = screenWidth();
     const int h = screenHeight();
@@ -566,8 +633,7 @@ void drawFramedArrivals(const std::string& stopLabel,
         drawWifiOffAt(bx - 2, 3, p.capInk);
     }
 
-    // Column header. Names what the three numbers are, which the plain screen
-    // never says.
+    // Column header. Names the two countdowns. The plain screen never says.
     const int hdrY = kTitleBarHeight;
     canvas.fillRect(0, hdrY, w, kColumnHeaderHeight, p.chrome);
     drawBevel(0, hdrY, w, kColumnHeaderHeight, p.hi, p.lo);
@@ -575,7 +641,7 @@ void drawFramedArrivals(const std::string& stopLabel,
     canvas.drawString("Service", layout.serviceColX + 2, hdrY + 3);
     const char* colNames[] = {"Next", "Then", "Then"};
     canvas.setTextDatum(top_right);
-    for (size_t c = 0; c < kArrivalsPerService; ++c) {
+    for (size_t c = 0; c < kShownArrivals; ++c) {
         canvas.drawString(colNames[c], layout.etaColRightX[c],
                           hdrY + 3);
     }
@@ -596,24 +662,24 @@ void drawFramedArrivals(const std::string& stopLabel,
         canvas.setFont(arrivalsFont());
         canvas.setTextColor(p.ink);
         canvas.setTextDatum(top_left);
-        drawBoldString(row.serviceNo.c_str(), layout.serviceColX + 2,
-                       y, /*growLeft=*/false);
+        const int serviceX = layout.serviceColX + 2;
+        const InlineLabelPlace labelPlace = placeInlineLabel(
+            row.serviceNo, serviceX, y, layout.etaColRightX[0],
+            /*framed=*/true);
+        drawBoldString(row.serviceNo.c_str(), serviceX, y, /*growLeft=*/false);
 
-        if (rowShowsLabel(row)) {
-            const int labelX = layout.serviceColX + 2;
-            const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
-            const int maxLabelWidth = screenWidth() - labelX - 8;
+        if (rowShowsLabel(row) && labelPlace.maxWidth > 0) {
             // Day marker is the title-bar navy. Night uses cyan as RGB888:
             // a uint16 TFT_CYAN stored in a uint32 is read as dark blue.
             const uint32_t markerColor =
                 (p.capA == 0x000080) ? 0x000080 : 0x00FFFF;
-            drawLabelLine(row, labelX, labelY, maxLabelWidth, p.ink,
-                          markerColor);
+            drawLabelLine(row, labelPlace.x, labelPlace.y, labelPlace.maxWidth,
+                          p.ink, markerColor);
         }
 
         canvas.setFont(arrivalsFont());
         canvas.setTextDatum(top_right);
-        for (size_t col = 0; col < kArrivalsPerService; ++col) {
+        for (size_t col = 0; col < kShownArrivals; ++col) {
             const BusArrival& arrival = row.arrivals[col];
             const std::string eta = formatEtaMinutes(arrival.etaEpoch,
                                                      nowEpoch);
@@ -714,21 +780,18 @@ void displaySetTheme(bool win95) {
     canvas.setFont(arrivalsFont());
     const int rowHeight = canvas.fontHeight();
 
-    // Compute both single-line (no labels) and two-line (with labels) layouts
     if (win95Theme) {
         const int listHeight = screenHeight() - kFramedChromeHeight;
         // computeArrivalsLayout reserves its first row for a header that the
         // framed screen draws as chrome instead, so it is handed one row more
         // than the list really has and hands the right count back.
-        arrivalsLayoutSingleLine = computeArrivalsLayout(
-            screenWidth(), listHeight + rowHeight, rowHeight, /*battery=*/0, false);
-        arrivalsLayoutTwoLine = computeArrivalsLayout(
-            screenWidth(), listHeight + rowHeight, rowHeight, /*battery=*/0, true);
+        arrivalsLayout = computeArrivalsLayout(
+            screenWidth(), listHeight + rowHeight, rowHeight, /*battery=*/0,
+            /*hasLabels=*/true);
     } else {
-        arrivalsLayoutSingleLine = computeArrivalsLayout(
-            screenWidth(), screenHeight(), rowHeight, kHeaderRightPad, false);
-        arrivalsLayoutTwoLine = computeArrivalsLayout(
-            screenWidth(), screenHeight(), rowHeight, kHeaderRightPad, true);
+        arrivalsLayout = computeArrivalsLayout(
+            screenWidth(), screenHeight(), rowHeight, kHeaderRightPad,
+            /*hasLabels=*/true);
     }
 
     canvas.setTextFont(kDefaultTextFont);
@@ -736,10 +799,7 @@ void displaySetTheme(bool win95) {
 
 bool displayThemeIsWin95() { return win95Theme; }
 
-size_t servicesPerScreen(bool hasLabels) {
-    return hasLabels ? arrivalsLayoutTwoLine.servicesPerScreen
-                     : arrivalsLayoutSingleLine.servicesPerScreen;
-}
+size_t servicesPerScreen() { return arrivalsLayout.servicesPerScreen; }
 
 void displaySetDimmed(bool dimmed) {
     hal::displayDeviceSetBrightness(dimmed ? board().brightnessDim
@@ -901,15 +961,7 @@ void displayShowArrivals(const std::string& stopLabel,
     canvas.setFont(arrivalsFont());
     canvas.setTextColor(TFT_WHITE, TFT_BLACK);
 
-    bool hasLabels = false;
-    for (const BusServiceRow& row : rows) {
-        if (rowShowsLabel(row)) {
-            hasLabels = true;
-            break;
-        }
-    }
-    
-    const ArrivalsLayout& layout = hasLabels ? arrivalsLayoutTwoLine : arrivalsLayoutSingleLine;
+    const ArrivalsLayout& layout = arrivalsLayout;
     const int rowHeight = layout.rowHeight;
 
     canvas.setTextDatum(top_center);
@@ -940,19 +992,19 @@ void displayShowArrivals(const std::string& stopLabel,
         canvas.setFont(arrivalsFont());
         canvas.setTextColor(TFT_WHITE, TFT_BLACK);
         canvas.setTextDatum(top_left);
+        const InlineLabelPlace labelPlace = placeInlineLabel(
+            row.serviceNo, layout.serviceColX, y, layout.etaColRightX[0],
+            /*framed=*/false);
         canvas.drawString(row.serviceNo.c_str(), layout.serviceColX, y);
 
-        if (rowShowsLabel(row)) {
-            const int labelX = layout.serviceColX;
-            const int labelY = y + (board().arrivalsFontHeight >= 24 ? 20 : 15);
-            const int maxLabelWidth = screenWidth() - labelX - 8;
-            drawLabelLine(row, labelX, labelY, maxLabelWidth, TFT_WHITE,
-                          TFT_CYAN);
+        if (rowShowsLabel(row) && labelPlace.maxWidth > 0) {
+            drawLabelLine(row, labelPlace.x, labelPlace.y, labelPlace.maxWidth,
+                          TFT_WHITE, TFT_CYAN);
         }
 
         canvas.setFont(arrivalsFont());
         canvas.setTextDatum(top_right);
-        for (size_t col = 0; col < kArrivalsPerService; ++col) {
+        for (size_t col = 0; col < kShownArrivals; ++col) {
             const BusArrival& arrival = row.arrivals[col];
             std::string eta = formatEtaMinutes(arrival.etaEpoch, nowEpoch);
 

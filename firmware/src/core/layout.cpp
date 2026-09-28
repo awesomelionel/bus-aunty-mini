@@ -13,6 +13,8 @@ constexpr int kPageDotsBottomInset = 4;
 static_assert(kArrivalsPerService > 1,
               "the ETA columns are spread between two anchors, so there have "
               "to be at least two of them");
+static_assert(kShownArrivals >= 1 && kShownArrivals <= kArrivalsPerService,
+              "the compact row draws a subset of the stored arrivals");
 
 }  // namespace
 
@@ -22,19 +24,9 @@ ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
     ArrivalsLayout layout{};
     layout.hasLabels = hasLabels;
     layout.serviceColX = kServiceColX;
-    
-    // Two-line pitch for stops with labels: about 27px on 240x135, 34px on 320x170
-    // Single-line pitch for stops without: 18px on 240x135, 25px on 320x170
-    if (hasLabels) {
-        // For DejaVu18 (h=18): 27px. For DejaVu24 (h=25): 34px.
-        if (rowHeight >= 24) {
-            layout.rowHeight = 34;
-        } else {
-            layout.rowHeight = 27;
-        }
-    } else {
-        layout.rowHeight = rowHeight;
-    }
+    // Destination text shares the service number's line, so a labelled stop
+    // uses the same pitch as one without labels.
+    layout.rowHeight = rowHeight;
 
     // The header takes the first row, so one fewer than the rows that fit is
     // available for services. A row taller than the screen leaves none.
@@ -49,12 +41,21 @@ ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
     // the edge. The columns are spread at equal pitch across that span and
     // rounded to whole pixels, which at 240px reproduces the {119, 178, 236}
     // these values were before they were derived.
+    // The old three-column spread still sets the pitch: leftmost just short
+    // of the midpoint, rightmost kRightMargin from the edge. The compact row
+    // keeps the rightmost kShownArrivals of those columns. Dropping the
+    // leftmost one is what gives the destination its width.
     const int etaLeft = screenWidth / 2 - 1;
     const int etaRight = screenWidth - kRightMargin;
     const int span = etaRight - etaLeft;
     constexpr int steps = static_cast<int>(kArrivalsPerService) - 1;
+    int spread[kArrivalsPerService];
     for (int i = 0; i < static_cast<int>(kArrivalsPerService); ++i) {
-        layout.etaColRightX[i] = etaLeft + (span * i + steps / 2) / steps;
+        spread[i] = etaLeft + (span * i + steps / 2) / steps;
+    }
+    const int skip = static_cast<int>(kArrivalsPerService - kShownArrivals);
+    for (int i = 0; i < static_cast<int>(kShownArrivals); ++i) {
+        layout.etaColRightX[i] = spread[skip + i];
     }
 
     layout.headerCenterX = (screenWidth - batteryReservedWidth) / 2;

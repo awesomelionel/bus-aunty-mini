@@ -66,15 +66,6 @@ hal::PowerStatus charged() {
     return power;
 }
 
-bool rowsHaveLabels(const std::vector<BusServiceRow>& rows) {
-    for (const BusServiceRow& row : rows) {
-        if (rowShowsLabel(row)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 // What the firmware can actually show. Win95 is T-Display only
 // (supportsFramedTheme). Night is the framed palette only: the plain path
 // never calls isNightAt. Passing Win95 on StickS3 or Feather stays plain,
@@ -126,22 +117,26 @@ bool drawEach(const std::string& out, const std::string& scenario,
     return ok;
 }
 
-// Page 0 of the full stop. Page count is measured after the theme is set,
-// because Win95 chrome fits fewer rows than the plain list.
+// Every page, not just the first. Page count is measured after the theme is
+// set, because Win95 chrome fits fewer rows than the plain list.
 bool drawStopPages(const std::string& out, const std::string& scenario,
                    const ParsedBusStop& stop, const std::string& title) {
     bool ok = true;
     for (const View& view : kViews) {
         prepare(view.board, view.win95);
-        const size_t per = servicesPerScreen(rowsHaveLabels(stop.rows));
+        const size_t per = servicesPerScreen();
         const size_t pages = servicePageCount(stop.rows, per);
-        const std::vector<BusServiceRow> page =
-            selectServicePage(stop.rows, per, 0);
-        std::cout << scenario << " " << view.tag << " pages " << pages
-                  << " rows " << page.size() << "\n";
-        ok &= drawArrivals(out + "/" + scenario + "_" + view.tag + ".png",
-                           view.board, view.win95, view.night, title, page,
-                           stop.updatedAtEpoch, 0, 0, pages, false);
+        std::cout << scenario << " " << view.tag << " per " << per << " pages "
+                  << pages << "\n";
+        for (size_t pageIndex = 0; pageIndex < pages; ++pageIndex) {
+            const std::vector<BusServiceRow> page =
+                selectServicePage(stop.rows, per, pageIndex);
+            ok &= drawArrivals(out + "/" + scenario + "_p" +
+                                   std::to_string(pageIndex) + "_" + view.tag +
+                                   ".png",
+                               view.board, view.win95, view.night, title, page,
+                               stop.updatedAtEpoch, 0, pageIndex, pages, false);
+        }
     }
     return ok;
 }
@@ -166,18 +161,25 @@ int main(int argc, char** argv) {
         parseBusArrivalResponse(readFile(data + "/stop_52109.json"), "52109");
     const ParsedBusStop stop52109Dd = parseBusArrivalResponse(
         readFile(data + "/stop_52109_125dd.json"), "52109");
+    const ParsedBusStop stop52049 =
+        parseBusArrivalResponse(readFile(data + "/stop_52049.json"), "52049");
     const ParsedBusStop stop66271 =
         parseBusArrivalResponse(readFile(data + "/stop_66271.json"), "66271");
+    const ParsedBusStop stop75009 =
+        parseBusArrivalResponse(readFile(data + "/figure_eight.json"), "75009");
     const ParsedBusStop term =
         parseBusArrivalResponse(readFile(data + "/terminating.json"), "52109");
-    if (!stop52109.valid || !stop52109Dd.valid || !stop66271.valid ||
-        !term.valid) {
+    if (!stop52109.valid || !stop52109Dd.valid || !stop52049.valid ||
+        !stop66271.valid || !stop75009.valid || !term.valid) {
         std::cerr << "fixtures did not parse\n";
         return 1;
     }
 
     bool ok = true;
-    ok &= drawStopPages(out, "dots", stop52109, "Opp St. Michael's");
+    ok &= drawStopPages(out, "stop52109", stop52109, "Opp St. Michael's");
+    ok &= drawStopPages(out, "stop52049", stop52049, "52049");
+    ok &= drawStopPages(out, "stop66271", stop66271, "66271");
+    ok &= drawStopPages(out, "stop75009", stop75009, "Tampines Int");
 
     // The 17:18 capture is the one where 125 visit 2 is a double-decker.
     // The plain theme does not draw that mark; Win95 does, on the ETA line.

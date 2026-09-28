@@ -12,17 +12,21 @@ struct ArrivalsLayout {
     int rowHeight;
     int serviceColX;
     // Right edges of the ETA columns; the text is right-aligned to these.
-    int etaColRightX[kArrivalsPerService];
+    // kShownArrivals wide: the rightmost columns of the old three-column
+    // spread, so the dropped column's width is free for the destination.
+    int etaColRightX[kShownArrivals];
     int headerCenterX;  // centred in what the battery icon leaves free
     int pageDotsY;
-    bool hasLabels;  // whether this layout accommodates labels
+    // Recorded from the caller. Labels share the service line, so this does
+    // not change row pitch or how many services fit.
+    bool hasLabels;
 };
 
 // `rowHeight` is passed in rather than measured here, because measuring needs
 // a font and a font needs a device. `batteryReservedWidth` is the horizontal
 // space the battery icon occupies at the top right, which the header is
-// centred clear of. `hasLabels` determines row spacing: true uses two-line
-// pitch to accommodate labels, false uses single-line pitch for density.
+// centred clear of. `hasLabels` is stored and does not change spacing: the
+// destination is drawn on the service number's line.
 ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
                                      int rowHeight, int batteryReservedWidth,
                                      bool hasLabels);

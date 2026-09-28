@@ -207,15 +207,6 @@ void syncTime() {
     timeSynced = !shouldBlockForNtp(now);
 }
 
-bool cachedRowsHaveLabels(const std::vector<BusServiceRow>& rows) {
-    for (const BusServiceRow& row : rows) {
-        if (rowShowsLabel(row)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 void showArrivalScreen(ArrivalScreen screen, const StopCache& cache) {
     const std::string hm = formatLocalHm(cache.updatedAtEpoch);
     switch (screen) {
@@ -272,14 +263,12 @@ void renderCachedPage() {
         return;
     }
 
-    bool hasLabels = cachedRowsHaveLabels(live);
-    size_t totalPages =
-        servicePageCount(live, servicesPerScreen(hasLabels));
+    size_t totalPages = servicePageCount(live, servicesPerScreen());
     if (currentPage >= totalPages) {
         currentPage = 0;
     }
     std::vector<BusServiceRow> page =
-        selectServicePage(live, servicesPerScreen(hasLabels), currentPage);
+        selectServicePage(live, servicesPerScreen(), currentPage);
 
     displayShowArrivals(cache.label, page, nowEpoch, currentStopIndex,
                          busStops.size(), currentPage, totalPages,
@@ -366,9 +355,7 @@ void pollAndRender() {
         return;
     }
     
-    bool hasLabels = cachedRowsHaveLabels(cache.rows);
-    if (currentPage >=
-        servicePageCount(cache.rows, servicesPerScreen(hasLabels))) {
+    if (currentPage >= servicePageCount(cache.rows, servicesPerScreen())) {
         currentPage = 0;
     }
     renderCachedPage();
@@ -392,9 +379,7 @@ void stepForward() {
     if (time(nullptr) >= kClockSetEpoch) {
         pruneExpiredArrivals(live, time(nullptr));
     }
-    bool hasLabels = cachedRowsHaveLabels(live);
-    size_t totalPages =
-        servicePageCount(live, servicesPerScreen(hasLabels));
+    size_t totalPages = servicePageCount(live, servicesPerScreen());
     if (currentPage + 1 < totalPages) {
         ++currentPage;
         renderCachedPage();

@@ -4,9 +4,12 @@
 // Truncates text to fit within maxWidth, appending "." if truncated.
 // ASCII only (0x20-0x7E); non-ASCII bytes replaced with '?'.
 // Uses widthCallback to measure text width (e.g., canvas.textWidth()).
+// `breakOnWords` stops at the last word that fits. The inline destination
+// passes false: a short first word ("St.") would otherwise leave most of
+// the gutter blank.
 template<typename WidthFunc>
 std::string truncateText(const std::string& text, int maxWidth,
-                         WidthFunc widthCallback) {
+                         WidthFunc widthCallback, bool breakOnWords = true) {
     if (text.empty()) {
         return text;
     }
@@ -38,21 +41,24 @@ std::string truncateText(const std::string& text, int maxWidth,
         return cleaned;
     }
     
-    // Try cutting at word boundaries
+    // Try cutting at word boundaries. Skipped when the caller would rather
+    // fill the width than stop after a short first word.
     size_t lastSpace = 0;
-    for (size_t i = 0; i < cleaned.size(); ++i) {
-        if (cleaned[i] == ' ') {
-            // Strip trailing '.' and spaces before appending "."
-            std::string prefix = cleaned.substr(0, i);
-            while (!prefix.empty() && 
-                   (prefix.back() == '.' || prefix.back() == ' ')) {
-                prefix.pop_back();
-            }
-            std::string candidate = prefix + ".";
-            if (widthCallback(candidate.c_str()) <= maxWidth) {
-                lastSpace = i;
-            } else {
-                break;
+    if (breakOnWords) {
+        for (size_t i = 0; i < cleaned.size(); ++i) {
+            if (cleaned[i] == ' ') {
+                // Strip trailing '.' and spaces before appending "."
+                std::string prefix = cleaned.substr(0, i);
+                while (!prefix.empty() &&
+                       (prefix.back() == '.' || prefix.back() == ' ')) {
+                    prefix.pop_back();
+                }
+                std::string candidate = prefix + ".";
+                if (widthCallback(candidate.c_str()) <= maxWidth) {
+                    lastSpace = i;
+                } else {
+                    break;
+                }
             }
         }
     }
@@ -68,9 +74,11 @@ std::string truncateText(const std::string& text, int maxWidth,
     
     // Hard cut if one word is too long
     for (size_t i = 1; i < cleaned.size(); ++i) {
-        // Strip trailing '.' before appending
+        // Strip a trailing '.' or space so the cut is "Serangoon." and
+        // not "Serangoon .".
         std::string prefix = cleaned.substr(0, i);
-        while (!prefix.empty() && prefix.back() == '.') {
+        while (!prefix.empty() &&
+               (prefix.back() == '.' || prefix.back() == ' ')) {
             prefix.pop_back();
         }
         if (prefix.empty()) {
@@ -81,7 +89,8 @@ std::string truncateText(const std::string& text, int maxWidth,
             if (i > 1) {
                 // Back up and try again
                 prefix = cleaned.substr(0, i - 1);
-                while (!prefix.empty() && prefix.back() == '.') {
+                while (!prefix.empty() &&
+                       (prefix.back() == '.' || prefix.back() == ' ')) {
                     prefix.pop_back();
                 }
                 if (prefix.empty()) {
@@ -91,7 +100,11 @@ std::string truncateText(const std::string& text, int maxWidth,
                 candidate = prefix + ".";
                 while (widthCallback(candidate.c_str()) > maxWidth && !prefix.empty()) {
                     prefix.pop_back();
-                    candidate = prefix + ".";
+                    while (!prefix.empty() &&
+                           (prefix.back() == '.' || prefix.back() == ' ')) {
+                        prefix.pop_back();
+                    }
+                    candidate = prefix.empty() ? "." : prefix + ".";
                 }
                 if (prefix.empty()) {
                     return ".";
@@ -107,8 +120,9 @@ std::string truncateText(const std::string& text, int maxWidth,
     while (widthCallback(result.c_str()) > maxWidth && result.size() > 1) {
         result.pop_back();  // Remove last char before "."
         result.pop_back();  // Remove "."
-        if (!result.empty() && result.back() == '.') {
-            result.pop_back();  // Strip trailing "." again
+        while (!result.empty() &&
+               (result.back() == '.' || result.back() == ' ')) {
+            result.pop_back();
         }
         if (result.empty()) {
             return ".";
