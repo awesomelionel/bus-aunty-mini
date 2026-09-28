@@ -609,6 +609,10 @@ void loop() {
             inConfigScreen = false;
             offlineRendered = false;
             noStopsRendered = false;
+            // The config screen is still on the panel. Drop the "frame is
+            // current" flag so the next pass redraws instead of waiting out
+            // the 15s refresh while offline.
+            cachedFrameValid = false;
             needsImmediateFetch = wifiLinkConnected();
             noteInteraction();
             return;
@@ -658,6 +662,17 @@ void loop() {
 
     if (wifiLinkConnecting() || !wifiLinkConnected()) {
         if (cachedStop) {
+            // Page while the radio is down. A page change redraws here, and
+            // a stop change only marks the frame stale so the gate below
+            // draws the cached stop.
+            if (hal::wasClicked(hal::Button::Primary)) {
+                stepForward();
+                cachedFrameValid = false;
+            }
+            if (hal::wasClicked(hal::Button::Previous)) {
+                stepBack();
+                cachedFrameValid = false;
+            }
             const bool offline = !wifiLinkConnected();
             const uint32_t nowMs = millis();
             const bool stateChanged =

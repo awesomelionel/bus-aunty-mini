@@ -7,7 +7,7 @@
 #include "core/iso8601.h"
 #include "core/night_window.h"
 
-#ifdef ESP32
+#if defined(ESP32) || defined(HOST_STREAM)
 #include <Stream.h>
 #endif
 
@@ -170,7 +170,7 @@ ParsedBusStop parseBusArrivalResponse(const std::string& json,
     return parsedFromDoc(doc, expectedStopCode);
 }
 
-#ifdef ESP32
+#if defined(ESP32) || defined(HOST_STREAM)
 ParsedBusStop parseBusArrivalStream(Stream& input,
                                     const std::string& expectedStopCode) {
     JsonDocument doc;

@@ -4,56 +4,8 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 
+#include "net/bounded_stream.h"
 #include "net/certs.h"
-
-namespace {
-
-// Stops a Stream once `left` bytes have been read, so a missing
-// Content-Length cannot pull an unbounded body into the JSON parser.
-class BoundedStream : public Stream {
-public:
-    BoundedStream(Stream& inner, size_t cap) : inner_(inner), left_(cap) {}
-
-    int available() override {
-        if (left_ == 0) {
-            return 0;
-        }
-        const int n = inner_.available();
-        if (n <= 0) {
-            return 0;
-        }
-        if (static_cast<size_t>(n) > left_) {
-            return static_cast<int>(left_);
-        }
-        return n;
-    }
-
-    int read() override {
-        if (left_ == 0) {
-            return -1;
-        }
-        const int c = inner_.read();
-        if (c >= 0) {
-            --left_;
-        }
-        return c;
-    }
-
-    int peek() override {
-        if (left_ == 0) {
-            return -1;
-        }
-        return inner_.peek();
-    }
-
-    size_t write(uint8_t) override { return 0; }
-
-private:
-    Stream& inner_;
-    size_t left_;
-};
-
-}  // namespace
 
 FetchResult fetchBusArrival(const std::string& busStopCode) {
     FetchResult result;
@@ -85,6 +37,10 @@ FetchResult fetchBusArrival(const std::string& busStopCode) {
 
     BoundedStream capped(http.getStream(),
                          static_cast<size_t>(kMaxArrivalBodyBytes));
+    // Stream's own timeout is 1000 ms and is what ArduinoJson waits on.
+    // ReadBufferingStream is not in ArduinoJson 7.4, which still reads one
+    // byte at a time, so there is no buffer to add here.
+    capped.setTimeout(8000);
     result.parsed = parseBusArrivalStream(capped, busStopCode);
     http.end();
     return result;

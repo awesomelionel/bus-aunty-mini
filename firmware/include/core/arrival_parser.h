@@ -109,8 +109,8 @@ size_t servicePageCount(const std::vector<BusServiceRow>& rows, size_t pageSize)
 std::vector<BusServiceRow> selectServicePage(
     const std::vector<BusServiceRow>& rows, size_t pageSize, size_t page);
 
-#ifdef ESP32
-#include <Stream.h>
+#if defined(ESP32) || defined(HOST_STREAM)
+class Stream;
 ParsedBusStop parseBusArrivalStream(Stream& input,
                                     const std::string& expectedStopCode);
 #endif
