@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "bus_aunty_version.h"
 #include "core/arrival_parser.h"
 #include "core/arrival_screen.h"
 #include "core/backoff_scheduler.h"
@@ -86,6 +87,7 @@ size_t currentPage = 0;
 void noteInteraction() { lastInteractionMillis = millis(); }
 
 void logWifiDiagnostics() {
+    Serial.printf("[boot] Bus Aunty " BUS_AUNTY_VERSION "\n");
     Serial.printf("[boot] reset reason %d, free heap %u\n",
                   static_cast<int>(esp_reset_reason()), ESP.getFreeHeap());
 

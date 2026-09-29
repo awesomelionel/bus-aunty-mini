@@ -140,6 +140,30 @@ The first argument is the output directory (default `/opt/cursor/artifacts`) and
 the second is the fixture directory (default `test/data`). `host_render` is not
 in `default_envs`, so a plain `pio run` skips it. CI builds it in its own step.
 
+## Releases
+
+Releases are versioned by git tag. Pushing a tag like `v0.2.0` runs
+`.github/workflows/release.yml`, which builds every board at that tag and
+publishes a GitHub Release with one image per board, e.g.
+`bus-aunty-sticks3-v0.2.0.bin`:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Each image already holds the bootloader and partition table, so it is written
+whole at offset 0, with no PlatformIO needed:
+
+```sh
+esptool.py --chip esp32s3 write_flash 0x0 bus-aunty-sticks3-v0.2.0.bin
+```
+
+The version shows in the setup page's status bar and in the first line of the
+serial log. A local build takes its version from `git describe`, so it reads
+like `v0.2.0-3-gabc1234-dirty`; `pio run -e <board> -t mergebin` writes the
+same single image into `.pio/build/<board>/`.
+
 ## Run the unit tests
 
 The pure logic in `src/core/` (ISO-8601 parsing, ETA formatting, JSON parsing,

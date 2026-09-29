@@ -3,6 +3,7 @@
 
 #include <cstdio>
 
+#include "bus_aunty_version.h"
 #include "core/html_escape.h"
 
 namespace config_page {
@@ -374,11 +375,13 @@ void sendSettings(WebServer& server, const Model& model) {
 
     String status = "<div class='win'><div class='status'><span>";
     status += String(static_cast<unsigned>(model.stops->size()));
-    status += " of 4 stops &middot; ";
+    status += " of ";
+    status += String(static_cast<unsigned>(kMaxBusStops));
+    status += " stops &middot; ";
     status += String(static_cast<unsigned>(model.networks->size()));
     status += " of 5 networks</span><span>";
     status += model.apMode ? "Setup AP" : "On your WiFi";
-    status += "</span></div></div>";
+    status += "</span><span>" BUS_AUNTY_VERSION "</span></div></div>";
     chunk(server, status);
 
     closeDocument(server);
