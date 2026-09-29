@@ -319,6 +319,10 @@ constexpr int kDefaultTextFont = 2;  // 16px; see displayShowWifiSetup
 // about 6.9:1 on black. TFT_DARKGREY quantizes to ~4.0:1, which is too low.
 constexpr int kTerminatingEta = 0x8410;
 
+// RGB565 dark grey for the rule between spread rows. Faint on purpose: it
+// groups a row's number and times without competing with either.
+constexpr int kRowRule = 0x3186;
+
 uint16_t loadColor(BusLoad load) {
     switch (load) {
         case BusLoad::SeatsAvailable:
@@ -984,10 +988,28 @@ void displayShowArrivals(const std::string& stopLabel,
         drawWifiOff(batteryLeft);
     }
     
-    for (size_t i = 0;
-         i < rows.size() && i < layout.servicesPerScreen; ++i) {
-        int y = rowHeight + static_cast<int>(i) * rowHeight;
+    // A short page spreads its rows over the list, each drawn in the middle
+    // of its slot with a rule between slots so the extra space groups a row
+    // rather than floating between them. A full page is laid out as before.
+    const size_t shown = rows.size() < layout.servicesPerScreen
+                             ? rows.size()
+                             : layout.servicesPerScreen;
+    const int pitch =
+        board().spreadsShortPages
+            ? spreadRowPitch(rowHeight, screenHeight() - rowHeight, shown,
+                             layout.servicesPerScreen)
+            : rowHeight;
+    const int inset = (pitch - rowHeight) / 2;
+    for (size_t i = 0; i < shown; ++i) {
+        const int slotY = rowHeight + static_cast<int>(i) * pitch;
+        const int y = slotY + inset;
         const BusServiceRow& row = rows[i];
+
+        if (pitch > rowHeight && i > 0) {
+            canvas.drawFastHLine(layout.serviceColX, slotY,
+                                 screenWidth() - 2 * layout.serviceColX,
+                                 kRowRule);
+        }
 
         canvas.setFont(arrivalsFont());
         canvas.setTextColor(TFT_WHITE, TFT_BLACK);

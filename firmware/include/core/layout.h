@@ -30,3 +30,11 @@ struct ArrivalsLayout {
 ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
                                      int rowHeight, int batteryReservedWidth,
                                      bool hasLabels);
+
+// Row pitch for a page of `rowCount` services in a list `listHeight` tall.
+// A full page keeps `rowHeight`. A short one -- the pager keeps a service's
+// rows together, so a page can end a row or more early -- spreads its rows
+// over the list, capped at half a row extra so a page of one or two does
+// not scatter down the screen.
+int spreadRowPitch(int rowHeight, int listHeight, size_t rowCount,
+                   size_t servicesPerScreen);

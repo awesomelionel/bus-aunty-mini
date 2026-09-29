@@ -62,3 +62,16 @@ ArrivalsLayout computeArrivalsLayout(int screenWidth, int screenHeight,
     layout.pageDotsY = screenHeight - kPageDotsBottomInset;
     return layout;
 }
+
+int spreadRowPitch(int rowHeight, int listHeight, size_t rowCount,
+                   size_t servicesPerScreen) {
+    if (rowCount == 0 || rowCount >= servicesPerScreen || rowHeight <= 0) {
+        return rowHeight;
+    }
+    int pitch = listHeight / static_cast<int>(rowCount);
+    const int cap = rowHeight * 3 / 2;
+    if (pitch > cap) {
+        pitch = cap;
+    }
+    return pitch > rowHeight ? pitch : rowHeight;
+}

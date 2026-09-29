@@ -32,6 +32,8 @@ constexpr BoardProfile kProfile = {
     /*detectsBatteryPresence=*/true,
     // 170px carries the chrome and still shows four services.
     /*supportsFramedTheme=*/true,
+    // A page that stops at four rows gives them the fifth row's height.
+    /*spreadsShortPages=*/true,
 };
 
 }  // namespace

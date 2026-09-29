@@ -5,19 +5,21 @@
 namespace {
 
 BoardProfile gBoard = {
-    "StickS3", 240, 135, 1, 18, 128, 16, "Btn B", ButtonArrow::None, true, false,
+    "StickS3", 240, 135, 1, 18, 128, 16, "Btn B", ButtonArrow::None, true,
+    false,     false,
 };
 
 const BoardProfile kSticks = {
-    "StickS3", 240, 135, 1, 18, 128, 16, "Btn B", ButtonArrow::None, true, false,
+    "StickS3", 240, 135, 1, 18, 128, 16, "Btn B", ButtonArrow::None, true,
+    false,     false,
 };
 const BoardProfile kFeather = {
     "Reverse TFT Feather", 240, 135, 3, 18, 128, 16,
-    "middle btn",          ButtonArrow::None, false, false,
+    "middle btn",          ButtonArrow::None, false, false, false,
 };
 const BoardProfile kTdisplay = {
     "T-Display-S3", 320, 170, 1, 24, 128, 16,
-    "BOOT btn",     ButtonArrow::Left, true, true,
+    "BOOT btn",     ButtonArrow::Left, true, true, true,
 };
 
 }  // namespace
