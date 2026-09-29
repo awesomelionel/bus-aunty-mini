@@ -29,6 +29,7 @@ constexpr BoardProfile kProfile = {
     /*detectsBatteryPresence=*/false,
     // Same 135px ceiling as the StickS3.
     /*supportsFramedTheme=*/false,
+    /*spreadsShortPages=*/false,
 };
 
 }  // namespace

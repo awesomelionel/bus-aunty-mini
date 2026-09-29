@@ -23,6 +23,7 @@ constexpr BoardProfile kProfile = {
     /*detectsBatteryPresence=*/true,
     // 135px leaves no room for window chrome on top of the rows.
     /*supportsFramedTheme=*/false,
+    /*spreadsShortPages=*/false,
 };
 
 }  // namespace

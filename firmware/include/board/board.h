@@ -64,6 +64,12 @@ struct BoardProfile {
     // of services. The 240x135 boards do not: the same chrome would leave
     // them two rows out of six, so the config page never offers it there.
     bool supportsFramedTheme;
+
+    // True when the plain arrivals screen spreads a short page's rows over
+    // the whole list instead of leaving the bottom slot empty. Only the
+    // 320x170 panel: its 25px rows are dense enough that the extra room
+    // reads as easier, not as gaps.
+    bool spreadsShortPages;
 };
 
 const BoardProfile& board();

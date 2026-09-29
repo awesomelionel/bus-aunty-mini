@@ -161,6 +161,30 @@ void test_win95_compact_rows_fit_four_on_t_display() {
     TEST_ASSERT_EQUAL_INT(316, layout.etaColRightX[1]);
 }
 
+// The T-Display fits five 25px rows under the header. A page that stops at
+// four -- two services seen twice each -- spreads them over the 145px list,
+// and the pitch never drops below a row or climbs past half a row extra.
+void test_a_short_page_spreads_its_rows() {
+    TEST_ASSERT_EQUAL_INT(36, spreadRowPitch(25, 145, 4, 5));
+    TEST_ASSERT_EQUAL_INT(37, spreadRowPitch(25, 145, 2, 5));
+    TEST_ASSERT_EQUAL_INT(37, spreadRowPitch(25, 145, 1, 5));
+}
+
+void test_a_full_page_keeps_the_row_height() {
+    TEST_ASSERT_EQUAL_INT(25, spreadRowPitch(25, 145, 5, 5));
+    TEST_ASSERT_EQUAL_INT(25, spreadRowPitch(25, 145, 6, 5));
+}
+
+void test_an_empty_page_keeps_the_row_height() {
+    TEST_ASSERT_EQUAL_INT(25, spreadRowPitch(25, 145, 0, 5));
+}
+
+// Spreading never packs rows tighter than drawn, even in a list too short
+// for the rows it is handed.
+void test_spreading_never_shrinks_a_row() {
+    TEST_ASSERT_EQUAL_INT(25, spreadRowPitch(25, 60, 4, 5));
+}
+
 void setup() {}
 void loop() {}
 
@@ -179,5 +203,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_a_screen_one_row_tall_fits_nothing);
     RUN_TEST(test_a_zero_row_height_does_not_divide_by_zero);
     RUN_TEST(test_win95_compact_rows_fit_four_on_t_display);
+    RUN_TEST(test_a_short_page_spreads_its_rows);
+    RUN_TEST(test_a_full_page_keeps_the_row_height);
+    RUN_TEST(test_an_empty_page_keeps_the_row_height);
+    RUN_TEST(test_spreading_never_shrinks_a_row);
     return UNITY_END();
 }
