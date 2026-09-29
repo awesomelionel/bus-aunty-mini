@@ -1,29 +1,18 @@
 #pragma once
 #include <string>
 
-// Truncates text to fit within maxWidth, appending "." if truncated.
-// ASCII only (0x20-0x7E); non-ASCII bytes replaced with '?'.
-// Uses widthCallback to measure text width (e.g., canvas.textWidth()).
-// `breakOnWords` stops at the last word that fits. The inline destination
-// passes false: a short first word ("St.") would otherwise leave most of
-// the gutter blank.
-template<typename WidthFunc>
-std::string truncateText(const std::string& text, int maxWidth,
-                         WidthFunc widthCallback, bool breakOnWords = true) {
-    if (text.empty()) {
-        return text;
-    }
-    
-    // Clean non-ASCII bytes: skip UTF-8 continuation bytes (0x80-0xBF),
-    // replace non-ASCII starting bytes with one '?'
+// The display fonts only cover printable ASCII, so text is reduced to that
+// before it is measured or drawn. Curly quotes (U+2018/U+2019, which the feed
+// uses in "Michael's" and phone keyboards type for an apostrophe) become a
+// plain '; any other non-ASCII character becomes one '?'.
+inline std::string toDisplayAscii(const std::string& text) {
     std::string cleaned;
     for (size_t i = 0; i < text.size(); ++i) {
         unsigned char c = static_cast<unsigned char>(text[i]);
-        // U+2019 RIGHT SINGLE QUOTATION MARK (UTF-8 E2 80 99) is the
-        // apostrophe the feed uses in "Michael's".
         if (c == 0xE2 && i + 2 < text.size() &&
             static_cast<unsigned char>(text[i + 1]) == 0x80 &&
-            static_cast<unsigned char>(text[i + 2]) == 0x99) {
+            (static_cast<unsigned char>(text[i + 2]) == 0x98 ||
+             static_cast<unsigned char>(text[i + 2]) == 0x99)) {
             cleaned += '\'';
             i += 2;
             continue;
@@ -36,7 +25,24 @@ std::string truncateText(const std::string& text, int maxWidth,
         }
         // Skip continuation bytes
     }
+    return cleaned;
+}
+
+// Truncates text to fit within maxWidth, appending "." if truncated.
+// Cleaned with toDisplayAscii first.
+// Uses widthCallback to measure text width (e.g., canvas.textWidth()).
+// `breakOnWords` stops at the last word that fits. The inline destination
+// passes false: a short first word ("St.") would otherwise leave most of
+// the gutter blank.
+template<typename WidthFunc>
+std::string truncateText(const std::string& text, int maxWidth,
+                         WidthFunc widthCallback, bool breakOnWords = true) {
+    if (text.empty()) {
+        return text;
+    }
     
+    const std::string cleaned = toDisplayAscii(text);
+
     if (widthCallback(cleaned.c_str()) <= maxWidth) {
         return cleaned;
     }

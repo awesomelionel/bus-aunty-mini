@@ -33,6 +33,11 @@ void test_replaces_non_ascii_with_question_mark() {
     TEST_ASSERT_EQUAL_STRING("Caf?", result.c_str());
 }
 
+void test_left_curly_quote_becomes_ascii() {
+    std::string result = truncateText("\xE2\x80\x98Hi", 200, mockWidth);
+    TEST_ASSERT_EQUAL_STRING("'Hi", result.c_str());
+}
+
 void test_curly_apostrophe_becomes_ascii() {
     // U+2019 is UTF-8 E2 80 99.
     std::string result = truncateText("Michael\xE2\x80\x99s", 200, mockWidth);
@@ -132,6 +137,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_hard_cuts_long_single_word);
     RUN_TEST(test_replaces_non_ascii_with_question_mark);
     RUN_TEST(test_curly_apostrophe_becomes_ascii);
+    RUN_TEST(test_left_curly_quote_becomes_ascii);
     RUN_TEST(test_returns_dot_when_nothing_fits);
     RUN_TEST(test_empty_string_returns_empty);
     RUN_TEST(test_multiple_word_boundaries);

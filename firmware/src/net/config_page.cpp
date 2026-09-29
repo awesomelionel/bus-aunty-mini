@@ -201,7 +201,9 @@ void writeStopRows(WebServer& server, const std::vector<BusStopConfig>& stops,
         row += String(n);
         row += "' value='";
         row += escapeHtml(name).c_str();
-        row += "' maxlength='16' autocomplete='off' placeholder='Home' "
+        row += "' maxlength='";
+        row += String(static_cast<unsigned>(kBusStopNameMaxChars));
+        row += "' autocomplete='off' placeholder='Home' "
                "aria-label='Stop ";
         row += String(n);
         row += " name'></div>";

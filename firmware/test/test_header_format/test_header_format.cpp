@@ -22,6 +22,12 @@ void test_full_header_fits() {
     TEST_ASSERT_EQUAL_STRING("Stop Name (1/2)", result.c_str());
 }
 
+void test_name_that_fits_is_still_made_ascii() {
+    std::string result = buildHeader("S\xE2\x80\x99goon", 0, 1, 0,
+                                     updatedAt(), 300, mockWidth);
+    TEST_ASSERT_EQUAL_STRING("S'goon (1/1)", result.c_str());
+}
+
 void test_fresh_under_150s_has_no_age() {
     std::string result =
         buildHeader("Stop", 0, 1, 149000, updatedAt(), 400, mockWidth);
@@ -80,6 +86,7 @@ void loop() {}
 
 int main(int argc, char** argv) {
     UNITY_BEGIN();
+    RUN_TEST(test_name_that_fits_is_still_made_ascii);
     RUN_TEST(test_full_header_fits);
     RUN_TEST(test_fresh_under_150s_has_no_age);
     RUN_TEST(test_stale_header_uses_as_of);
