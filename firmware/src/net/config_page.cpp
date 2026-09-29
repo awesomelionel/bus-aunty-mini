@@ -171,8 +171,16 @@ void openWindow(WebServer& server, const char* title) {
 
 void closeWindow(WebServer& server) { chunk(server, "</div></div>"); }
 
-void writeStopRows(WebServer& server, const std::vector<BusStopConfig>& stops) {
-    for (size_t i = 0; i < kMaxBusStops; ++i) {
+void writeStopRows(WebServer& server, const std::vector<BusStopConfig>& stops,
+                   size_t requestedRows) {
+    // Every saved stop, one spare to type into, and never fewer than four so
+    // a fresh device still looks like a form. Capped by what the firmware
+    // can hold.
+    size_t rows = stops.size() + 1;
+    if (rows < 4) rows = 4;
+    if (rows < requestedRows) rows = requestedRows;
+    if (rows > kMaxBusStops) rows = kMaxBusStops;
+    for (size_t i = 0; i < rows; ++i) {
         const char* code = i < stops.size() ? stops[i].code.c_str() : "";
         const char* name = i < stops.size() ? stops[i].name.c_str() : "";
         const unsigned n = static_cast<unsigned>(i + 1);
@@ -305,7 +313,16 @@ void sendSettings(WebServer& server, const Model& model) {
           "<p class='hint'>At least one is required. The code is 3&ndash;5 "
           "digits and keeps its leading zeros, like 00481. The name is "
           "optional and shows on screen instead of the code.</p>");
-    writeStopRows(server, *model.stops);
+    writeStopRows(server, *model.stops, model.stopRows);
+    if (model.stops->size() < kMaxBusStops) {
+        chunk(server,
+              "<div class='foot'><button class='sm' form='setup' "
+              "name='action' value='add' formaction='/stops?add=1'>"
+              "Add another stop</button></div>");
+    } else {
+        chunk(server, "<p class='hint'>That is the most stops the device "
+                      "can hold.</p>");
+    }
     chunk(server, "</fieldset>");
 
     chunk(server,

@@ -72,10 +72,11 @@ void test_build_drops_rows_without_a_valid_code() {
     TEST_ASSERT_EQUAL_STRING("67379", busStopLabel(stops[1]).c_str());
 }
 
-void test_build_caps_at_four_stops() {
-    std::vector<BusStopConfig> rows = {{"11111", ""}, {"22222", ""},
-                                       {"33333", ""}, {"44444", ""},
-                                       {"55555", ""}};
+void test_build_caps_at_max_stops() {
+    std::vector<BusStopConfig> rows;
+    for (size_t i = 0; i < kMaxBusStops + 1; ++i) {
+        rows.push_back({std::to_string(10000 + i), ""});
+    }
     TEST_ASSERT_EQUAL_UINT32(kMaxBusStops, buildBusStopList(rows).size());
 }
 
@@ -116,7 +117,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_name_strips_control_characters);
     RUN_TEST(test_name_strips_characters_that_break_the_portal_form);
     RUN_TEST(test_build_drops_rows_without_a_valid_code);
-    RUN_TEST(test_build_caps_at_four_stops);
+    RUN_TEST(test_build_caps_at_max_stops);
     RUN_TEST(test_round_trips_through_serialization);
     RUN_TEST(test_empty_blob_yields_no_stops);
     RUN_TEST(test_corrupt_blob_yields_no_bad_stops);

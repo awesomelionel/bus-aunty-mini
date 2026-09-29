@@ -6,7 +6,7 @@ seconds (120s, then 240s, then 300s after consecutive failures) and shows up to
 6 bus services — 5 on the T-Display-S3, which spends a row on larger text, or 4
 with its optional Windows 95 screen. A destination label under the service
 number costs two of those rows (4, 4, and 3). Each row shows up to 3 arrival
-times, for up to 4 configured bus stops. Bus stops and WiFi credentials are both
+times, for up to 10 configured bus stops. Bus stops and WiFi credentials are both
 set on a page the device serves at `http://busaunty.local` — nothing is compiled in.
 
 ## Supported boards
