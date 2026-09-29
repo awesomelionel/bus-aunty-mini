@@ -1,0 +1,53 @@
+name: release
+
+# Pushing a tag like v0.2.0 builds every board at that tag and publishes a
+# GitHub Release with one flashable image per board. The tag is the version:
+# it is baked into the firmware, shown on the setup page, and in the file names.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      BUS_AUNTY_VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: ${{ runner.os }}-pio-${{ hashFiles('firmware/platformio.ini') }}
+          restore-keys: ${{ runner.os }}-pio-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Host unit tests
+        working-directory: firmware
+        run: pio test -e native
+
+      - name: Build merged images
+        working-directory: firmware
+        run: |
+          mkdir -p ../dist
+          for board in sticks3 feather_s3_revtft tdisplay_s3; do
+            pio run -e "$board" -t mergebin
+            cp ".pio/build/$board/bus-aunty-$board-$BUS_AUNTY_VERSION.bin" ../dist/
+          done
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.bin \
+            --verify-tag --generate-notes --title "$GITHUB_REF_NAME"

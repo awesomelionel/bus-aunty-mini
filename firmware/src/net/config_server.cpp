@@ -35,7 +35,7 @@ void redirectHome() {
     server.send(303, "text/plain", "");
 }
 
-void renderSettings(const std::string& error) {
+void renderSettings(const std::string& error, size_t stopRows = 0) {
     config_page::Model model;
     model.networks = data.networks;
     model.stops = data.stops;
@@ -45,6 +45,7 @@ void renderSettings(const std::string& error) {
     model.supportsFramedTheme = board().supportsFramedTheme;
     model.apMode = apMode();
     model.error = error;
+    model.stopRows = stopRows;
     config_page::sendSettings(server, model);
 }
 
@@ -98,7 +99,8 @@ void handleRoot() {
     if (!requireUnlock()) {
         return;
     }
-    renderSettings("");
+    const int rows = server.arg("rows").toInt();
+    renderSettings("", rows > 0 ? static_cast<size_t>(rows) : 0);
 }
 
 void handleScan() {
@@ -161,6 +163,15 @@ void handleStops() {
         return;
     }
     parseStops();
+    if (server.hasArg("add")) {
+        // Saved, then shown again with one more empty row than before.
+        char location[24];
+        std::snprintf(location, sizeof(location), "/?rows=%u",
+                      static_cast<unsigned>(data.stops->size() + 2));
+        server.sendHeader("Location", location, true);
+        server.send(303, "text/plain", "");
+        return;
+    }
     redirectHome();
 }
 

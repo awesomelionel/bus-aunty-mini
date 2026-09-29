@@ -32,6 +32,9 @@ struct Model {
     bool apMode = false;
     // Shown in a callout at the top. Empty when there is nothing to say.
     std::string error;
+    // Stop rows to show at least, so "Add another stop" can grow the form
+    // beyond the filled rows plus one spare. 0 means the default.
+    size_t stopRows = 0;
 };
 
 // Streamed in chunks rather than built into one String: the markup runs to

@@ -6,7 +6,7 @@ seconds (120s, then 240s, then 300s after consecutive failures) and shows up to
 6 bus services — 5 on the T-Display-S3, which spends a row on larger text, or 4
 with its optional Windows 95 screen. A destination label under the service
 number costs two of those rows (4, 4, and 3). Each row shows up to 3 arrival
-times, for up to 4 configured bus stops. Bus stops and WiFi credentials are both
+times, for up to 10 configured bus stops. Bus stops and WiFi credentials are both
 set on a page the device serves at `http://busaunty.local` — nothing is compiled in.
 
 ## Supported boards
@@ -139,6 +139,30 @@ pio run -e host_render
 The first argument is the output directory (default `/opt/cursor/artifacts`) and
 the second is the fixture directory (default `test/data`). `host_render` is not
 in `default_envs`, so a plain `pio run` skips it. CI builds it in its own step.
+
+## Releases
+
+Releases are versioned by git tag. Pushing a tag like `v0.2.0` runs
+`.github/workflows/release.yml`, which builds every board at that tag and
+publishes a GitHub Release with one image per board, e.g.
+`bus-aunty-sticks3-v0.2.0.bin`:
+
+```sh
+git tag v0.2.0
+git push origin v0.2.0
+```
+
+Each image already holds the bootloader and partition table, so it is written
+whole at offset 0, with no PlatformIO needed:
+
+```sh
+esptool.py --chip esp32s3 write_flash 0x0 bus-aunty-sticks3-v0.2.0.bin
+```
+
+The version shows in the setup page's status bar and in the first line of the
+serial log. A local build takes its version from `git describe`, so it reads
+like `v0.2.0-3-gabc1234-dirty`; `pio run -e <board> -t mergebin` writes the
+same single image into `.pio/build/<board>/`.
 
 ## Run the unit tests
 

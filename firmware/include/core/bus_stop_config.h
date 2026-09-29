@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 
-constexpr size_t kMaxBusStops = 4;
+constexpr size_t kMaxBusStops = 10;
 constexpr size_t kBusStopCodeMinDigits = 3;
 constexpr size_t kBusStopCodeMaxDigits = 5;
 constexpr size_t kBusStopNameMaxChars = 16;
