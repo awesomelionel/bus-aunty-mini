@@ -7,7 +7,7 @@
 import os
 import subprocess
 
-Import("env")
+Import("env", "projenv")
 
 
 def resolve_version():
@@ -43,7 +43,9 @@ except OSError:
 if current != content:
     with open(header, "w") as f:
         f.write(content)
-env.Append(CPPPATH=[gen_dir])
+# This runs as a post script, after the environment that compiles src/ has
+# been cloned from env, so the include path has to go on that one.
+projenv.Append(CPPPATH=[gen_dir])
 print("Bus Aunty firmware version: %s" % VERSION)
 
 
