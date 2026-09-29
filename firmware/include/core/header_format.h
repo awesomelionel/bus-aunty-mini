@@ -13,10 +13,13 @@
 // The page indicator is dropped before the stop name is trimmed, and the
 // time is kept until the name has been trimmed away.
 template <typename WidthFunc>
-std::string buildHeader(const std::string& stopName, size_t currentPage,
+std::string buildHeader(const std::string& rawStopName, size_t currentPage,
                         size_t totalPages, uint32_t dataAgeMs,
                         int64_t updatedAtEpoch, int maxWidth,
                         WidthFunc widthCallback) {
+    // Cleaned here and not only in truncateText: a name short enough to fit
+    // never reaches truncateText, and would be drawn with its UTF-8 intact.
+    const std::string stopName = toDisplayAscii(rawStopName);
     std::string longSuffix;
     std::string shortSuffix;
     if (dataAgeMs >= kHeaderStaleNoteMs && updatedAtEpoch >= 0) {

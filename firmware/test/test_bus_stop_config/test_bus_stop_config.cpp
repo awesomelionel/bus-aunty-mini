@@ -54,11 +54,22 @@ void test_name_strips_control_characters() {
                              normalizeBusStopName("Home\x1fStop").c_str());
 }
 
-void test_name_strips_characters_that_break_the_portal_form() {
-    TEST_ASSERT_EQUAL_STRING("Ah Mas",
-                             normalizeBusStopName("Ah Ma's").c_str());
+void test_name_strips_angle_brackets() {
     TEST_ASSERT_EQUAL_STRING("bHome",
                              normalizeBusStopName("<b>Home").c_str());
+}
+
+void test_name_keeps_an_apostrophe() {
+    TEST_ASSERT_EQUAL_STRING("S'goon Gdn Circus",
+                             normalizeBusStopName("S'goon Gdn Circus").c_str());
+}
+
+void test_name_turns_curly_apostrophes_ascii() {
+    TEST_ASSERT_EQUAL_STRING(
+        "S'goon Gdn Circus",
+        normalizeBusStopName("S\xE2\x80\x99goon Gdn Circus").c_str());
+    TEST_ASSERT_EQUAL_STRING(
+        "'Home'", normalizeBusStopName("\xE2\x80\x98Home\xE2\x80\x99").c_str());
 }
 
 void test_build_drops_rows_without_a_valid_code() {
@@ -115,7 +126,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_code_rejects_non_digits_and_blanks);
     RUN_TEST(test_name_is_trimmed_and_capped);
     RUN_TEST(test_name_strips_control_characters);
-    RUN_TEST(test_name_strips_characters_that_break_the_portal_form);
+    RUN_TEST(test_name_strips_angle_brackets);
+    RUN_TEST(test_name_keeps_an_apostrophe);
+    RUN_TEST(test_name_turns_curly_apostrophes_ascii);
     RUN_TEST(test_build_drops_rows_without_a_valid_code);
     RUN_TEST(test_build_caps_at_max_stops);
     RUN_TEST(test_round_trips_through_serialization);

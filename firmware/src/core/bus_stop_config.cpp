@@ -50,14 +50,26 @@ bool normalizeBusStopCode(const std::string& raw, std::string* out) {
 
 std::string normalizeBusStopName(const std::string& raw) {
     std::string cleaned;
-    for (char c : raw) {
+    for (size_t i = 0; i < raw.size(); ++i) {
+        const char c = raw[i];
         unsigned char uc = static_cast<unsigned char>(c);
+        // Phone keyboards type a curly apostrophe (U+2018/U+2019). Store it as
+        // a plain one, which the display font has and which costs one byte of
+        // the name's length rather than three.
+        if (uc == 0xE2 && i + 2 < raw.size() &&
+            static_cast<unsigned char>(raw[i + 1]) == 0x80 &&
+            (static_cast<unsigned char>(raw[i + 2]) == 0x98 ||
+             static_cast<unsigned char>(raw[i + 2]) == 0x99)) {
+            cleaned.push_back('\'');
+            i += 2;
+            continue;
+        }
         if (uc < 0x20 || uc == 0x7f) {
             continue;  // control characters would break the persisted blob
         }
-        // The portal renders values into value='...' unescaped, so these would
-        // truncate the field the next time the form is opened.
-        if (c == '\'' || c == '<' || c == '>') {
+        // The portal escapes values it renders, so an apostrophe is safe; angle
+        // brackets are still dropped as there is no stop name that needs one.
+        if (c == '<' || c == '>') {
             continue;
         }
         cleaned.push_back(c);

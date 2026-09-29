@@ -250,7 +250,7 @@ screen:
 
 - **Code** (required): 3-5 digits, leading zeros preserved (`00481` stays
   `00481`). Rows with a missing or invalid code are dropped.
-- **Name** (optional, up to 16 characters): shown in the header instead of the
+- **Name** (optional, up to 24 characters): shown in the header instead of the
   code. A name with no code is ignored.
 
 With no stops configured, the screen reads `No Bus Stops Configured`, then
