@@ -124,12 +124,26 @@ void displayDeviceBegin() {
 
 void displayDeviceSetBrightness(uint8_t level) { gfx().setBrightness(level); }
 
-void displayDeviceSleep() { gfx().sleep(); }
+void displayDeviceSleep() {
+    // Duty 0 and the controller's sleep command, while the panel still has
+    // power. GPIO 15 is then dropped. On battery that pin is the green V3V
+    // indicator as well as the panel supply, so leaving it high leaves the
+    // LED lit for the whole sleep. The panel loses its state with the rail;
+    // displayDeviceWake brings both back.
+    gfx().sleep();
+    tdisplay::setPeripheralPower(false);
+}
 
 void displayDeviceWake() {
-    gfx().wakeup();
-    // Mirrors the other two boards: waking always comes back at full
-    // brightness, even when the device dozed off from the dimmed state.
+    tdisplay::setPeripheralPower(true);
+    // The parallel bus is an ESP32 peripheral and is still allocated from
+    // boot. init() allocates another, so the old one has to be released
+    // first. init() restores the stored rotation and the last brightness;
+    // the sets below are the same contract as the other boards, where a
+    // wake is always full brightness even if the device dozed off dimmed.
+    gfx().panel()->getBus()->release();
+    gfx().init();
+    gfx().setRotation(board().rotation);
     gfx().setBrightness(board().brightnessFull);
 }
 

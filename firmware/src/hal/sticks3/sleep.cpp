@@ -2,6 +2,7 @@
 #include "hal/sleep.h"
 
 #include <Arduino.h>
+#include <M5Unified.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
 
@@ -71,7 +72,17 @@ void sleepUntilButtonPress() {
     }
     esp_sleep_enable_gpio_wakeup();
 
+    // The green status LED is the M5PM1 LED_EN pin. It powers up high, and
+    // M5.Display.sleep() only takes the backlight to duty 0, so the LED stays
+    // lit through light sleep. LED_EN is a level: low is off. The PMIC is a
+    // separate chip and keeps that level while the SoC sleeps; the write
+    // after esp_light_sleep_start returns drives it high again, which is the
+    // level it had the whole time the device was awake.
+    M5.Power.M5pm1.setLedEnLevel(false);
+
     esp_light_sleep_start();
+
+    M5.Power.M5pm1.setLedEnLevel(true);
 
     // Disarm rather than leave a level-triggered wake standing, so the next
     // call arms it from a known state.
