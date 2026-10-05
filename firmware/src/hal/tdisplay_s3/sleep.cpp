@@ -64,10 +64,9 @@ void sleepUntilButtonPress() {
     }
     esp_sleep_enable_gpio_wakeup();
 
-    // The peripheral rail on GPIO 15 is deliberately left up through sleep.
-    // The vendor's own sleep example drops it, but that is for deep sleep
-    // where the panel is re-initialised on the way out anyway; here the panel
-    // keeps its own state and only its backlight is off.
+    // GPIO 15 is already low. displayDeviceSleep drops it so the green V3V
+    // indicator is off on battery, and displayDeviceWake raises it and
+    // re-inits the panel, which lost its state with the rail.
     esp_light_sleep_start();
 
     // Disarm rather than leave a level-triggered wake standing, so the next
